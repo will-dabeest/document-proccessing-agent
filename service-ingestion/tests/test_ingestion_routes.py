@@ -19,6 +19,7 @@ def test_internal_index_calls_index_document():
 
 def test_ask_returns_answer_question_payload():
     from app.main import app
+    from app.ollama_client import generate_llama3
 
     payload = {"answer": "from stub", "snippets": [{"text": "x", "metadata": {}}]}
     with patch("app.main.answer_question", return_value=payload) as aq:
@@ -27,7 +28,50 @@ def test_ask_returns_answer_question_payload():
     assert response.status_code == 200
     assert response.json() == payload
     aq.assert_called_once()
-    assert aq.call_args.kwargs["llm_call"] is not None
+    assert aq.call_args.kwargs["llm_call"] is generate_llama3
+
+
+def test_ask_endpoint_wires_ollama_and_retrieve_context():
+    from app.main import app
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"response": "synthesized"}
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("app.ollama_client.httpx.post", return_value=mock_resp) as post, patch(
+        "app.rag_service.retrieve_context",
+        return_value=(["ctx one"], [{"file": "a.txt"}]),
+    ):
+        client = TestClient(app)
+        response = client.post("/ask", json={"question": "Q1"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer"] == "synthesized"
+    assert data["snippets"] == [{"text": "ctx one", "metadata": {"file": "a.txt"}}]
+    post.assert_called_once()
+    prompt = post.call_args.kwargs["json"]["prompt"]
+    assert "Q1" in prompt
+    assert "ctx one" in prompt
+
+
+def test_ask_endpoint_ollama_failure_returns_fallback_answer():
+    from app.main import app
+
+    with patch(
+        "app.ollama_client.httpx.post",
+        side_effect=ConnectionError("down"),
+    ), patch(
+        "app.rag_service.retrieve_context",
+        return_value=(["ctx"], [{}]),
+    ):
+        client = TestClient(app)
+        response = client.post("/ask", json={"question": "Q?"})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == (
+        "LLM unavailable; install Ollama and pull llama3 for full answers."
+    )
 
 
 def test_documents_maps_dynamo_scan_items():
