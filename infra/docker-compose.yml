@@ -1,0 +1,124 @@
+name: doc-processing
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      SERVICES: s3,dynamodb,sqs,secretsmanager
+      DEBUG: "1"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://localhost:4566/_localstack/health >/dev/null || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
+  terraform:
+    image: hashicorp/terraform:1.7
+    working_dir: /workspace/infra
+    volumes:
+      - ..:/workspace
+    environment:
+      TF_VAR_localstack_endpoint: http://localstack:4566
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "terraform init -backend=false -input=false && terraform apply -input=false -auto-approve",
+      ]
+    depends_on:
+      localstack:
+        condition: service_healthy
+    restart: "no"
+
+  ingestion:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.ingestion
+    ports:
+      - "8000:8000"
+    environment:
+      USE_LOCALSTACK: "true"
+      AWS_ENDPOINT_URL: http://localstack:4566
+      QUEUE_URL: http://localstack:4566/000000000000/jobs
+      BUCKET_NAME: doc-storage
+      DYNAMODB_TABLE: ProcessLog
+      OTLP_ENDPOINT: jaeger:4317
+      CHROMA_PERSIST_DIR: /data/chroma
+    env_file:
+      - path: ../.env
+        required: false
+    volumes:
+      - chroma_data:/data/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      terraform:
+        condition: service_completed_successfully
+      jaeger:
+        condition: service_started
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    environment:
+      USE_LOCALSTACK: "true"
+      AWS_ENDPOINT_URL: http://localstack:4566
+      QUEUE_URL: http://localstack:4566/000000000000/jobs
+      BUCKET_NAME: doc-storage
+      DYNAMODB_TABLE: ProcessLog
+      INGESTION_BASE_URL: http://ingestion:8000
+      OTLP_ENDPOINT: jaeger:4317
+    env_file:
+      - path: ../.env
+        required: false
+    depends_on:
+      terraform:
+        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
+      ingestion:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+    ports:
+      - "5173:5173"
+    environment:
+      INGESTION_PROXY_TARGET: http://ingestion:8000
+    depends_on:
+      ingestion:
+        condition: service_healthy
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["llm"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  chroma_data:
+  ollama_data:
