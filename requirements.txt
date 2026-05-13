@@ -1,0 +1,4 @@
+-r service-ingestion/requirements.txt
+-r service-worker/requirements.txt
+pytest>=8.0.0
+moto[s3,sqs,dynamodb,secretsmanager]>=5.0.0
