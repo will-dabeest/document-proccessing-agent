@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 from app.ollama_client import generate_llama3
 
 
@@ -43,6 +45,25 @@ def test_generate_llama3_on_exception_returns_unavailable_message():
         "app.ollama_client.httpx.post",
         side_effect=ConnectionError("refused"),
     ):
+        out = generate_llama3("p")
+
+    assert out == (
+        "LLM unavailable; install Ollama and pull llama3 for full answers."
+    )
+
+
+def test_generate_llama3_on_http_status_error_returns_unavailable_message():
+    request = httpx.Request("POST", "http://ollama/api/generate")
+    response = httpx.Response(500, request=request, json={"error": "model missing"})
+    mock_resp = MagicMock(status_code=500)
+    mock_resp.json.return_value = {"error": "model missing"}
+    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "server error",
+        request=request,
+        response=response,
+    )
+
+    with patch("app.ollama_client.httpx.post", return_value=mock_resp):
         out = generate_llama3("p")
 
     assert out == (
