@@ -70,7 +70,7 @@ def test_ask_endpoint_ollama_failure_returns_fallback_answer():
 
     assert response.status_code == 200
     assert response.json()["answer"] == (
-        "LLM unavailable; install Ollama and pull llama3 for full answers."
+        "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
     )
 
 

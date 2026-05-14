@@ -26,7 +26,14 @@ class Settings(BaseSettings):
         default="http://localhost:11434",
         validation_alias="OLLAMA_BASE_URL",
     )
-    ollama_model: str = Field(default="llama3", validation_alias="OLLAMA_MODEL")
+    ollama_model: str = Field(
+        default="llama3:latest",
+        validation_alias="OLLAMA_MODEL",
+    )
+    ollama_http_timeout_seconds: float = Field(
+        default=600.0,
+        validation_alias="OLLAMA_HTTP_TIMEOUT_SECONDS",
+    )
     ingestion_base_url: str = Field(
         default="http://127.0.0.1:8000",
         validation_alias="INGESTION_BASE_URL",

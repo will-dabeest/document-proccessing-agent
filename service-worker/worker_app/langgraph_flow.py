@@ -72,7 +72,7 @@ def _ollama_generate(
                     "prompt": prompt,
                     "stream": False,
                 },
-                timeout=120.0,
+                timeout=settings.ollama_http_timeout_seconds,
             )
             latency_ms = (time.perf_counter() - t0) * 1000.0
             try:
@@ -93,6 +93,7 @@ def _ollama_generate(
                     stage=stage,
                     attempts=attempts,
                 )
+                err = (data or {}).get("error") if isinstance(data, dict) else None
                 log_llm_event(
                     logger,
                     span="llm.ollama.generate",
@@ -104,8 +105,14 @@ def _ollama_generate(
                     llm_stage=stage,
                     job_id=job_id,
                     llm_attempts=attempts,
+                    error=err,
                 )
-                logger.warning("ollama_failed: HTTP %s", r.status_code)
+                logger.warning(
+                    "ollama_failed: HTTP %s model=%s detail=%s",
+                    r.status_code,
+                    model,
+                    err or "",
+                )
                 return '{"classification": "Unknown", "summary": "LLM unavailable."}'
 
             text = ((data or {}).get("response") or "").strip()

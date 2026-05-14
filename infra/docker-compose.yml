@@ -10,6 +10,11 @@ services:
     environment:
       SERVICES: s3,dynamodb,sqs,secretsmanager
       DEBUG: "1"
+      # Align SQS queue URLs with hardcoded QUEUE_URL (…/000000000000/jobs). LocalStack 4
+      # defaults to SQS_ENDPOINT_STRATEGY=standard (AWS-style host), which does not match.
+      SQS_ENDPOINT_STRATEGY: "off"
+      # Host:port returned in queue URLs so other Compose services resolve LocalStack.
+      LOCALSTACK_HOST: "localstack:4566"
     healthcheck:
       test:
         [
@@ -60,6 +65,9 @@ services:
       DYNAMODB_TABLE: ProcessLog
       OTLP_ENDPOINT: jaeger:4317
       CHROMA_PERSIST_DIR: /data/chroma
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3:latest
+      OLLAMA_HTTP_TIMEOUT_SECONDS: "600"
     env_file:
       - path: ../.env
         required: false
@@ -76,6 +84,11 @@ services:
         condition: service_completed_successfully
       jaeger:
         condition: service_started
+      ollama:
+        condition: service_started
+    extra_hosts:
+      # Lets containers reach Ollama on the host via host.docker.internal (esp. Linux Engine).
+      - "host.docker.internal:host-gateway"
 
   worker:
     build:
@@ -89,6 +102,9 @@ services:
       DYNAMODB_TABLE: ProcessLog
       INGESTION_BASE_URL: http://ingestion:8000
       OTLP_ENDPOINT: jaeger:4317
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3:latest
+      OLLAMA_HTTP_TIMEOUT_SECONDS: "600"
     env_file:
       - path: ../.env
         required: false
@@ -99,6 +115,10 @@ services:
         condition: service_healthy
       ingestion:
         condition: service_healthy
+      ollama:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:
@@ -112,9 +132,9 @@ services:
       ingestion:
         condition: service_healthy
 
+  # Starts with no models; run once: docker compose exec ollama ollama pull <OLLAMA_MODEL>
   ollama:
     image: ollama/ollama:latest
-    profiles: ["llm"]
     ports:
       - "11434:11434"
     volumes:

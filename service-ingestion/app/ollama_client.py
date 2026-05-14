@@ -14,7 +14,7 @@ tracer = trace.get_tracer(__name__)
 
 
 def generate_llama3(prompt: str) -> str:
-    """Call Ollama generate API (llama3). Returns a user-visible string on failure."""
+    """Call Ollama /api/generate using settings.ollama_model. Returns a user-visible string on failure."""
     model = settings.ollama_model
     t0 = time.perf_counter()
     with tracer.start_as_current_span("llm.ollama.generate") as span:
@@ -23,7 +23,7 @@ def generate_llama3(prompt: str) -> str:
             r = httpx.post(
                 f"{settings.ollama_base_url}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": False},
-                timeout=120.0,
+                timeout=settings.ollama_http_timeout_seconds,
             )
             latency_ms = (time.perf_counter() - t0) * 1000.0
             data: dict | None
@@ -44,6 +44,7 @@ def generate_llama3(prompt: str) -> str:
                     outcome="http_error",
                     stage="ingestion.rag",
                 )
+                err = (data or {}).get("error") if isinstance(data, dict) else None
                 log_llm_event(
                     logger,
                     stage="ingestion.rag",
@@ -53,9 +54,15 @@ def generate_llama3(prompt: str) -> str:
                     latency_ms=round(latency_ms, 3),
                     prompt_chars=len(prompt),
                     http_status_code=r.status_code,
+                    error=err,
                 )
-                logger.warning("ollama_generate_failed: HTTP %s", r.status_code)
-                return "LLM unavailable; install Ollama and pull llama3 for full answers."
+                logger.warning(
+                    "ollama_generate_failed: HTTP %s model=%s detail=%s",
+                    r.status_code,
+                    model,
+                    err or "",
+                )
+                return "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
             text = (data.get("response") if data else None) or ""
             text = str(text).strip() or "No answer returned."
             outcome = "ok" if text != "No answer returned." else "empty_response"
@@ -103,4 +110,4 @@ def generate_llama3(prompt: str) -> str:
                 error=str(e),
             )
             logger.warning("ollama_generate_failed: %s", e)
-            return "LLM unavailable; install Ollama and pull llama3 for full answers."
+            return "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."

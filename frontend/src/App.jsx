@@ -25,6 +25,7 @@ async function fetchDocuments() {
 export default function App() {
   const queryClient = useQueryClient();
   const [file, setFile] = useState(null);
+  const [importUrl, setImportUrl] = useState("");
   const [question, setQuestion] = useState("");
   const [askResult, setAskResult] = useState(null);
 
@@ -45,6 +46,16 @@ export default function App() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents"] }),
   });
 
+  const importUrlMutation = useMutation({
+    mutationFn: async (url) => {
+      return api.post("/import-url", { url: url.trim() });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      setImportUrl("");
+    },
+  });
+
   async function submitAsk() {
     setAskResult(null);
     const { data } = await api.post("/ask", { question });
@@ -58,7 +69,8 @@ export default function App() {
           Document processing
         </h1>
         <p className="text-sm text-slate-600">
-          Upload files, track status from DynamoDB, ask questions (RAG).
+          Upload files or import a URL, track status from DynamoDB, ask questions
+          (RAG).
         </p>
       </header>
 
@@ -84,6 +96,42 @@ export default function App() {
         )}
         {uploadMutation.isSuccess && (
           <p className="mt-2 text-sm text-green-700">Uploaded successfully.</p>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 className="mb-2 font-medium">Import from URL</h2>
+        <p className="mb-2 text-sm text-slate-600">
+          Paste an https link to HTML, PDF, plain text, or markdown (single page).
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="url"
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder="https://example.com/docs/page"
+            className="min-w-[12rem] flex-1 rounded border border-slate-300 p-2 text-sm"
+          />
+          <button
+            type="button"
+            disabled={!importUrl.trim() || importUrlMutation.isPending}
+            onClick={() => importUrlMutation.mutate(importUrl)}
+            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          >
+            {importUrlMutation.isPending ? "Importing…" : "Import"}
+          </button>
+        </div>
+        {importUrlMutation.isError && (
+          <p className="mt-2 text-sm text-red-600">
+            {(() => {
+              const d = importUrlMutation.error?.response?.data?.detail;
+              if (d == null) return "Import failed.";
+              return typeof d === "string" ? d : JSON.stringify(d);
+            })()}
+          </p>
+        )}
+        {importUrlMutation.isSuccess && (
+          <p className="mt-2 text-sm text-green-700">Imported successfully.</p>
         )}
       </section>
 
