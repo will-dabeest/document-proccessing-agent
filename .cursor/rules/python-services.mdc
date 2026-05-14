@@ -1,0 +1,27 @@
+---
+description: Python layout, tests, and local dev for ingestion, worker, and shared code
+globs:
+  - service-ingestion/**/*.py
+  - service-worker/**/*.py
+  - shared/**/*.py
+alwaysApply: false
+---
+
+# Python services (this monorepo)
+
+## Layout
+
+- `service-ingestion/`: FastAPI ingestion API and related tests.
+- `service-worker/`: worker runtime and LangGraph (or similar) flow code.
+- `shared/`: cross-service modules (for example telemetry helpers).
+
+Prefer extending existing modules and test layout over new top-level packages unless the task requires it.
+
+## Tests
+
+- From the repository root, run the full Python suite with `python -m pytest -q`.
+- For faster feedback, scope pytest to the relevant tree, for example `python -m pytest -q service-ingestion/tests` or `service-worker/tests` or `shared/tests`.
+
+## Local development
+
+- Full stack and ports are documented in [docs/local-dev.md](docs/local-dev.md) (Compose-first workflow, optional host hot reload, Jaeger, LLM profiles).

@@ -2,7 +2,8 @@ name: doc-processing
 
 services:
   localstack:
-    image: localstack/localstack:latest
+    # Pinned: :latest may require LOCALSTACK_AUTH_TOKEN (LocalStack Cloud licensing).
+    image: localstack/localstack:4.4.0
     ports:
       - "4566:4566"
       - "4510-4559:4510-4559"

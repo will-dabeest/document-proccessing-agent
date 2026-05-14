@@ -1,0 +1,27 @@
+---
+description: Frontend (Vite + React) conventions and checks for this repo
+globs:
+  - frontend/**/*.tsx
+  - frontend/**/*.ts
+alwaysApply: false
+---
+
+# Frontend (`frontend/`)
+
+## Stack
+
+- Vite, React 18, TypeScript where used, Tailwind for styling.
+
+## Scripts
+
+- Local dev: `npm run dev` from `frontend/`.
+- Production build: from `frontend/`, run `npm ci` (first time) then `npm run build` (or `npm run build` after dependencies are installed).
+
+## Changes
+
+- Follow existing component and file organization; keep UI changes consistent with current Tailwind usage.
+- There is no `npm test` script in this package yet; rely on `npm run build` for a compile check after non-trivial edits.
+
+## Local development
+
+- See [docs/local-dev.md](docs/local-dev.md) for how the Vite app fits the Compose stack and env vars.

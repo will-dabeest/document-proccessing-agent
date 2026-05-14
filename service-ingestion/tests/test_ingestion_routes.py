@@ -40,7 +40,7 @@ def test_ask_endpoint_wires_ollama_and_retrieve_context():
 
     with patch("app.ollama_client.httpx.post", return_value=mock_resp) as post, patch(
         "app.rag_service.retrieve_context",
-        return_value=(["ctx one"], [{"file": "a.txt"}]),
+        return_value=(["ctx one"], [{"file": "a.txt"}], []),
     ):
         client = TestClient(app)
         response = client.post("/ask", json={"question": "Q1"})
@@ -63,7 +63,7 @@ def test_ask_endpoint_ollama_failure_returns_fallback_answer():
         side_effect=ConnectionError("down"),
     ), patch(
         "app.rag_service.retrieve_context",
-        return_value=(["ctx"], [{}]),
+        return_value=(["ctx"], [{}], []),
     ):
         client = TestClient(app)
         response = client.post("/ask", json={"question": "Q?"})

@@ -15,6 +15,7 @@ def fake_collection():
     col.query.return_value = {
         "documents": [["chunk-a", "chunk-b"]],
         "metadatas": [[{"file": "f.txt"}, {"file": "g.txt"}]],
+        "distances": [[0.1, 0.2]],
     }
     return col
 
@@ -76,16 +77,18 @@ def test_retrieve_context_passes_n_results_to_query(fake_model, fake_collection)
     with patch("app.rag_service._get_model", return_value=fake_model), patch(
         "app.rag_service._get_collection", return_value=fake_collection
     ):
-        docs, metas = retrieve_context("What is the policy?", n_results=7)
+        docs, metas, dists = retrieve_context("What is the policy?", n_results=7)
 
     fake_collection.query.assert_called_once()
     qcall = fake_collection.query.call_args
     assert qcall.kwargs["n_results"] == 7
+    assert qcall.kwargs["include"] == ["documents", "metadatas", "distances"]
     q_emb = qcall.kwargs["query_embeddings"]
     assert len(q_emb) == 1
     assert len(q_emb[0]) == 4
     assert docs == ["chunk-a", "chunk-b"]
     assert metas == [{"file": "f.txt"}, {"file": "g.txt"}]
+    assert dists == [0.1, 0.2]
 
 
 def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection):
@@ -95,3 +98,8 @@ def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection
         retrieve_context("Q?")
 
     assert fake_collection.query.call_args.kwargs["n_results"] == 3
+    assert fake_collection.query.call_args.kwargs["include"] == [
+        "documents",
+        "metadatas",
+        "distances",
+    ]

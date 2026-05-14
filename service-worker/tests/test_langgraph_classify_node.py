@@ -28,7 +28,7 @@ def test_classify_node_invalid_json_then_valid_json():
     fixed = '{"classification": "Tech", "summary": "Fixed summary."}'
     prompts: list[str] = []
 
-    def fake_generate(prompt: str) -> str:
+    def fake_generate(prompt: str, **_kwargs: object) -> str:
         prompts.append(prompt)
         if len(prompts) == 1:
             return "not valid json at all"
@@ -48,7 +48,7 @@ def test_classify_node_invalid_json_then_valid_json():
 def test_classify_node_invalid_json_twice():
     prompts: list[str] = []
 
-    def fake_generate(prompt: str) -> str:
+    def fake_generate(prompt: str, **_kwargs: object) -> str:
         prompts.append(prompt)
         return "still not json"
 

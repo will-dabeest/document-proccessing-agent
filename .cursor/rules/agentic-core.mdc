@@ -1,0 +1,55 @@
+---
+description: Core agent loop, safety, tests, bug and refactor discipline, product-code hygiene
+alwaysApply: true
+---
+
+# Agentic core
+
+## Minimal loop
+
+1. Plan the smallest viable approach.
+2. Generate the minimal required changes.
+3. Test using existing tests or lightweight checks (`python -m pytest -q` from repo root when in doubt).
+4. Evaluate failures, diffs, or unexpected behavior.
+5. Improve with targeted corrections.
+
+## Safety and verification
+
+- Change only what the task requires.
+- When touching several files, explain why each area changed and how the pieces fit together.
+- Prefer explicit, deterministic behavior; avoid unnecessary dependencies or abstractions.
+- Before treating work as finished, re-check requirements and run relevant checks (tests or the closest equivalent).
+
+## Testing
+
+- Treat tests as the source of truth; validate behavior with tests after substantive edits.
+- If coverage is missing for the change, add minimal, high-value tests rather than large suites.
+- On failures, read logs and failing assertions before guessing or retrying at random.
+
+## Bug fixes
+
+- Identify the **minimal root cause** before coding; prefer the smallest safe fix.
+- Validate with tests after the fix.
+
+## Refactors
+
+- Prefer **incremental** steps over one huge diff when the refactor spans multiple edits.
+- **Run tests after each meaningful step** when splitting refactors across commits or stages.
+
+## Dependencies
+
+- When adding or upgrading dependencies, check stability, maintenance, and security; prefer minimal, well-supported libraries.
+
+## Code quality
+
+- Match existing style and patterns; keep diffs small and reversible.
+- When refactoring, preserve behavior unless explicitly told otherwise.
+- Avoid speculative architecture and premature optimization.
+
+## Product code and repo hygiene
+
+For application code, shared libraries, infra scripts, and other non-rule files: if you find clear defects tied to the task, propose the **smallest safe** fix using the same loop above. Corrections must stay **behavior-preserving** unless the user asked for behavior change, and be **explained** before applying.
+
+## Editing `.cursor/rules`
+
+When the task edits files under `.cursor/rules/`, Cursor also applies **rule-authoring.mdc** for those paths. Follow it for frontmatter, links, and consistency across rules.
