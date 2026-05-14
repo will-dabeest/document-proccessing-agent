@@ -1,0 +1,30 @@
+---
+description: Human checkpoints and multi-step ordering for agent work
+alwaysApply: true
+---
+
+# Coordination
+
+## Human-in-the-loop
+
+- For large or risky scope, summarize the plan first and confirm direction with the user before broad or destructive edits.
+- If the user asked for checkpoints, pause for review before large commits or sweeping changes.
+- When helpful, remind the user to review the final diff before merge; do not assume merge approval.
+
+## Ambiguity
+
+- **When to ask (at most 1–2 questions):** the choice materially affects security, data-loss risk, a public API or contract, cost, or a large refactor; or requirements clearly contradict each other.
+- **When not to ask:** minor style or naming that can follow existing code; recoverable edits; details discoverable from the repo or tests.
+- **Default when unsure:** state the assumption in one line, take the smallest reversible step, and invite correction if the assumption was wrong.
+
+## Multi-step work
+
+- When improving work across several dimensions, prefer **correctness**, then **clarity**, then **performance**, then **documentation**.
+- Validate with tests or other agreed checks after each step before moving to the next dimension.
+
+## Parallelism and sub-agents
+
+- Prefer parallel **read-only** work when the surface area is large and tasks are independent (e.g. exploration, disjoint “where is X?” investigations).
+- **Concurrent writes** from sub-agents are acceptable only when scopes are **explicitly disjoint** (no overlapping files, no shared generated artifacts, no coupled edits to the same public surface unless the parent sequences them) and there are **no ordering hazards** (e.g. migrations, lockfile regeneration—single owner unless the user assigns lanes).
+- The **parent agent** merges results, resolves conflicts, runs agreed checks after subagents return (e.g. `python -m pytest -q` from repo root when in doubt), and explains the final diff as one narrative. Do not treat each sub-agent as done without that integration pass.
+- **Serialize or avoid** parallel writers for the same file, shared config or migrations, tightly coupled refactors, or any scope covered by **Human-in-the-loop** above—unless the user explicitly requests parallel write lanes with clear ownership.

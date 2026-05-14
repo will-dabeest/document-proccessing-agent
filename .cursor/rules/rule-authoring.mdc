@@ -1,0 +1,33 @@
+---
+description: Checklist for editing project Cursor rules under .cursor/rules
+globs:
+  - .cursor/rules/**/*.mdc
+alwaysApply: false
+---
+
+# Rule authoring
+
+Use this when creating or editing `.cursor/rules/*.mdc` files.
+
+## Structure and validity
+
+- Keep valid YAML frontmatter on every rule file: `description`, and either `alwaysApply: true` or `alwaysApply: false` with `globs` when rules should be file-scoped.
+- After edits, ensure globs still match the intended paths and that `alwaysApply` rules do not contradict each other.
+
+## Links and docs
+
+- Keep references to repository paths accurate (for example [docs/local-dev.md](docs/local-dev.md)).
+
+## Correction criteria
+
+When fixing or updating rules, changes should be:
+
+- **Minimal** and easy to review in git.
+- **Safe** (no accidental removal of needed guidance without replacement).
+- **Consistent** with this repository’s layout and architecture as described in other rules and docs.
+- **Behavior-preserving** for application and product code outside the rule files themselves, unless the task explicitly changes agent behavior.
+- **Explained** to the user before applying when they did not ask for a broad rewrite of all rules.
+
+## Consistency pass
+
+- After substantive rule edits, skim other `.cursor/rules/*.mdc` files for duplicated or conflicting guidance and resolve with the smallest edit set.

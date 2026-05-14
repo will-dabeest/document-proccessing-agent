@@ -5,6 +5,7 @@ from moto import mock_aws
 
 from worker_app.processor import (
     extract_text_from_object,
+    process_job_body,
     save_completed,
     try_claim_job,
 )
@@ -54,6 +55,52 @@ def test_try_claim_job_duplicate_done_after_completed():
     jid = "job-done-1"
     save_completed(table, jid, "Legal", "All good")
     assert try_claim_job(table, jid) == "duplicate_done"
+
+
+@mock_aws
+def test_process_job_body_invokes_run_agent_save_and_notify():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"bytes"
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value="extracted"
+    ), patch(
+        "worker_app.processor.run_agent",
+        return_value={"classification": "Tech", "summary": "Done"},
+    ) as ra, patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        process_job_body("job-x", "file.txt", tbl)
+
+    ra.assert_called_once()
+    state = ra.call_args[0][0]
+    assert state["document_text"] == "extracted"
+    assert state["job_id"] == "job-x"
+    assert state["s3_key"] == "file.txt"
+    sc.assert_called_once_with(tbl, "job-x", "Tech", "Done")
+    ni.assert_called_once_with("job-x", "file.txt", "extracted")
+
+
+def test_process_job_body_empty_extract_skips_notify_index():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b""
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value=""
+    ), patch(
+        "worker_app.processor.run_agent",
+        return_value={"classification": "Unknown", "summary": "empty"},
+    ) as ra, patch(
+        "worker_app.processor.save_completed"
+    ), patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        process_job_body("job-y", "empty.bin", tbl)
+
+    assert ra.call_args[0][0]["document_text"] == "(empty)"
+    ni.assert_not_called()
 
 
 @mock_aws

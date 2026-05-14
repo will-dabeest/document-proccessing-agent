@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app.aws_clients import get_dynamodb_resource, get_s3_client
 from app.config import settings
+from app.ollama_client import generate_llama3
 from app.publisher import publish_job_safe
 from app.rag_service import answer_question, index_document
 from shared.job_schema import JobMessage
@@ -107,23 +108,7 @@ class AskRequest(BaseModel):
 
 @app.post("/ask")
 async def ask(req: AskRequest):
-    import httpx
-
-    def llm_call(prompt: str) -> str:
-        try:
-            r = httpx.post(
-                f"{settings.ollama_base_url}/api/generate",
-                json={"model": "llama3", "prompt": prompt, "stream": False},
-                timeout=120.0,
-            )
-            r.raise_for_status()
-            data = r.json()
-            return (data.get("response") or "").strip() or "No answer returned."
-        except Exception as e:
-            logger.warning("ollama_generate_failed: %s", e)
-            return "LLM unavailable; install Ollama and pull llama3 for full answers."
-
-    return answer_question(req.question, llm_call=llm_call)
+    return answer_question(req.question, llm_call=generate_llama3)
 
 
 @app.get("/documents")

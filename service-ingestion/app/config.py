@@ -26,6 +26,7 @@ class Settings(BaseSettings):
         default="http://localhost:11434",
         validation_alias="OLLAMA_BASE_URL",
     )
+    ollama_model: str = Field(default="llama3", validation_alias="OLLAMA_MODEL")
     otlp_endpoint: str = Field(
         default="localhost:4317",
         validation_alias=AliasChoices("OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"),
