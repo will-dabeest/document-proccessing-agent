@@ -1,5 +1,5 @@
 ---
-description: Human checkpoints and multi-step ordering for agent work
+description: Human checkpoints, parent orchestration, and sub-agent coordination
 alwaysApply: true
 ---
 
@@ -21,6 +21,13 @@ alwaysApply: true
 
 - When improving work across several dimensions, prefer **correctness**, then **clarity**, then **performance**, then **documentation**.
 - Validate with tests or other agreed checks after each step before moving to the next dimension.
+
+## Parent orchestration
+
+- The **parent agent** owns the workstream end-to-end: scope and plan, task breakdown, delegating or doing work, merging outputs, running agreed checks, and a single coherent explanation for the user.
+- **Prefer delegating** (e.g. read-only exploration sub-agents, or explicitly scoped write lanes) when the surface area is large, investigations are independent, or parallel discovery clearly reduces calendar time without increasing merge risk.
+- **Prefer acting directly** when the change is narrow (few files, one failure, one API), the path is already obvious from the repo, or delegation would add handoff cost without reducing risk.
+- Sub-agent output is **input** to the parent until merged: the parent verifies assumptions, reconciles conflicts, and does not treat a sub-agent run as finished work without the integration pass described below.
 
 ## Parallelism and sub-agents
 

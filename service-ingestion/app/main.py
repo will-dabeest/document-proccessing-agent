@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
@@ -20,6 +21,7 @@ from app.config import settings
 from app.ollama_client import generate_llama3
 from app.publisher import publish_job_safe
 from app.rag_service import answer_question, index_document
+from app.url_import import UrlImportError, fetch_url_document
 from shared.job_schema import JobMessage
 
 logging.basicConfig(level=logging.INFO)
@@ -49,7 +51,7 @@ def _configure_tracing() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _configure_tracing()
-    app.state.config = {"model": "llama3"}
+    app.state.config = {"model": settings.ollama_model}
     yield
 
 
@@ -88,6 +90,34 @@ async def upload(file: UploadFile = File(...)):
     except UnicodeDecodeError:
         pass
     return {"status": "uploaded", "file": safe_name, "job_id": job.idempotency_key}
+
+
+class ImportUrlRequest(BaseModel):
+    url: str
+
+
+@app.post("/import-url")
+async def import_url(req: ImportUrlRequest):
+    try:
+        body, ext = await fetch_url_document(req.url, settings)
+    except UrlImportError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    s3_key = f"imports/{uuid.uuid4()}{ext}"
+    s3 = get_s3_client()
+    buf = BytesIO(body)
+    s3.upload_fileobj(buf, settings.bucket_name, s3_key)
+    job = JobMessage(s3_key=s3_key)
+    try:
+        publish_job_safe(job, filename=s3_key)
+    except Exception:
+        raise HTTPException(status_code=502, detail="URL content stored but job publish failed")
+    try:
+        text = body.decode("utf-8")
+        index_document(job.idempotency_key, s3_key, text)
+    except UnicodeDecodeError:
+        pass
+    return {"status": "imported", "file": s3_key, "job_id": job.idempotency_key}
 
 
 class IndexRequest(BaseModel):

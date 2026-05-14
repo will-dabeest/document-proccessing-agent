@@ -17,7 +17,7 @@ At a high level, the **browser** talks to the **ingestion** API through the Vite
 
 ## Local development
 
-**[docs/local-dev.md](docs/local-dev.md)** is the single place for local setup: Docker prerequisites, running the stack, verifying services, tests on the host, teardown, optional `.env`, LLM/RAG and Ollama (including Compose `--profile llm`), hot reload on the host, Jaeger-oriented notes, and troubleshooting.
+**[docs/local-dev.md](docs/local-dev.md)** is the single place for local setup: Docker prerequisites, running the stack (including the **ollama** service by default), verifying services, tests on the host, teardown, optional `.env`, LLM/RAG and Ollama, hot reload on the host, Jaeger-oriented notes, and troubleshooting.
 
 ## Project history and notes
 

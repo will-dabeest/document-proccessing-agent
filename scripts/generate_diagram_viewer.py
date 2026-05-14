@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Extract ```mermaid blocks from docs/*.md and write docs/diagrams-viewer.html."""
+
+from __future__ import annotations
+
+import html
+import sys
+from pathlib import Path
+
+# Diagram Markdown inputs (repo-relative) and layout — also used by scripts/cursor_mermaid_after_file_edit.py
+SOURCE_MARKDOWN: tuple[str, ...] = (
+    "docs/architecture.md",
+    "docs/cursor-agent-workflow.md",
+)
+_SOURCE_SET = frozenset(SOURCE_MARKDOWN)
+GENERATOR_RELPATH = Path("scripts") / "generate_diagram_viewer.py"
+
+
+def find_repo_root(start: Path) -> Path | None:
+    for parent in [start, *start.parents]:
+        if (parent / GENERATOR_RELPATH).is_file():
+            return parent
+    return None
+
+
+def match_diagram_source(abs_path: Path) -> Path | None:
+    repo = find_repo_root(abs_path.parent)
+    if repo is None:
+        return None
+    try:
+        rel = abs_path.resolve().relative_to(repo)
+    except ValueError:
+        return None
+    if rel.as_posix() not in _SOURCE_SET:
+        return None
+    return repo
+
+
+OUTPUT = "docs/diagrams-viewer.html"
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = find_repo_root(_SCRIPTS_DIR)
+if REPO_ROOT is None:
+    raise RuntimeError(
+        "generate_diagram_viewer.py must live in scripts/ under a repo "
+        f"that contains {GENERATOR_RELPATH.as_posix()}"
+    )
+
+
+def _parse_atx_heading(line: str) -> tuple[str | None, str | None]:
+    """Return ('h2', text) or ('h3', text) or (None, None)."""
+    s = line.lstrip()
+    if s.startswith("####"):
+        return (None, None)
+    if s.startswith("### "):
+        return ("h3", s[4:].strip())
+    if s.startswith("## "):
+        return ("h2", s[3:].strip())
+    return (None, None)
+
+
+def extract_diagrams(md_path: Path, rel_display: str) -> list[tuple[str, str]]:
+    """
+    Return list of (section_title, mermaid_body) for each ```mermaid block.
+    Title: nearest preceding ### if still in scope, else ##.
+    """
+    text = md_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    diagrams: list[tuple[str, str]] = []
+    i = 0
+    h2: str | None = None
+    h3: str | None = None
+    in_fence = False
+    fence_lang: str | None = None
+    mermaid_lines: list[str] = []
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if in_fence:
+            if stripped == "```":
+                if fence_lang == "mermaid":
+                    body = "\n".join(mermaid_lines).strip()
+                    title = h3 or h2 or f"{rel_display} — diagram {len(diagrams) + 1}"
+                    diagrams.append((title, body))
+                    mermaid_lines = []
+                in_fence = False
+                fence_lang = None
+            elif fence_lang == "mermaid":
+                mermaid_lines.append(line)
+            i += 1
+            continue
+
+        # Outside any fence: track headings
+        kind, title_text = _parse_atx_heading(line)
+        if kind == "h2":
+            h2 = title_text
+            h3 = None
+        elif kind == "h3":
+            h3 = title_text
+
+        if stripped.startswith("```"):
+            rest = stripped[3:].strip()
+            in_fence = True
+            fence_lang = rest.split()[0] if rest else ""
+            if fence_lang == "mermaid":
+                mermaid_lines = []
+            i += 1
+            continue
+
+        i += 1
+
+    return diagrams
+
+
+HTML_HEAD = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project diagrams (Mermaid)</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --text: #e6edf3;
+      --muted: #8b9cb3;
+      --accent: #58a6ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1.5rem 1.25rem 1rem;
+      border-bottom: 1px solid #30363d;
+      max-width: 72rem;
+      margin: 0 auto;
+    }
+    header h1 { font-size: 1.25rem; margin: 0 0 0.35rem; }
+    header p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    header a { color: var(--accent); }
+    main { max-width: 72rem; margin: 0 auto; padding: 1.25rem; }
+    section {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 1rem 1rem 1.5rem;
+      margin-bottom: 1.5rem;
+      border: 1px solid #30363d;
+    }
+    section h2 {
+      font-size: 1rem;
+      margin: 0 0 0.75rem;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    section .source {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    .mermaid { display: flex; justify-content: center; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <!-- Generated by scripts/generate_diagram_viewer.py — do not edit by hand -->
+  <header>
+    <h1>Architecture and workflow diagrams</h1>
+    <p>
+      Renders the same Mermaid as in
+      <a href="architecture.md">architecture.md</a> and
+      <a href="cursor-agent-workflow.md">cursor-agent-workflow.md</a>.
+      Regenerate with <code>python scripts/generate_diagram_viewer.py</code> from the repo root
+      after editing diagrams in those Markdown files.
+      Open this file in a browser (double-click or <code>file://</code>).
+      Use the browser print dialog to save as PDF if needed.
+    </p>
+  </header>
+  <main>
+"""
+
+HTML_TAIL = """  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "dark",
+      securityLevel: "loose",
+      flowchart: { useMaxWidth: true, htmlLabels: true },
+      sequence: { useMaxWidth: true },
+    });
+    mermaid.run({ querySelector: ".mermaid" });
+  </script>
+</body>
+</html>
+"""
+
+
+def main() -> int:
+    all_sections: list[tuple[str, str, str]] = []
+    for rel in SOURCE_MARKDOWN:
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            print(f"error: missing source {path}", file=sys.stderr)
+            return 1
+        for title, body in extract_diagrams(path, rel):
+            all_sections.append((rel, title, body))
+
+    out_path = REPO_ROOT / OUTPUT
+    parts: list[str] = [HTML_HEAD]
+    for rel, title, body in all_sections:
+        safe_title = html.escape(title, quote=False)
+        safe_source = html.escape(f"{rel} — {title}", quote=False)
+        if "</" in body or "<script" in body.lower():
+            print(f"error: diagram in {rel} contains forbidden HTML-like sequence", file=sys.stderr)
+            return 1
+        parts.append(f"""    <section>
+      <h2>{safe_title}</h2>
+      <p class="source">{safe_source}</p>
+      <div class="mermaid">
+{body}
+      </div>
+    </section>
+
+""")
+    parts.append(HTML_TAIL)
+    out_path.write_text("".join(parts), encoding="utf-8", newline="\n")
+    print(f"Wrote {out_path} ({len(all_sections)} diagram(s))")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

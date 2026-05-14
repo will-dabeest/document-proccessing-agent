@@ -25,6 +25,7 @@ This starts, in order:
 2. **terraform** (one-shot `init` + `apply` against `http://localstack:4566`)
 3. **ingestion** (FastAPI on [http://localhost:8000](http://localhost:8000)), **worker**, **frontend** (Vite on [http://localhost:5173](http://localhost:5173))
 4. **Jaeger** UI on [http://localhost:16686](http://localhost:16686)
+5. **Ollama** ([http://localhost:11434](http://localhost:11434) from the host). Ingestion and the worker use `OLLAMA_BASE_URL=http://ollama:11434` as set in [docker-compose.yml](../infra/docker-compose.yml). Pull a model once inside the container (see below).
 
 ### Verify
 
@@ -61,15 +62,17 @@ python -m pytest -q
 
 Copy [.env.example](.env.example) to `.env` at the repo root if you need overrides. Compose loads `.env` when present (`required: false`).
 
-### Optional: Ollama in Compose
+### Ollama in Compose (default)
 
-From `infra/`:
+`docker compose up` starts the **ollama** service with the rest of the stack. Models live in the `ollama_data` volume (not your host Ollama install). After the first `up`, pull the model the apps expect (`OLLAMA_MODEL` in `.env`, default `llama3:latest`):
 
 ```bash
-docker compose --profile llm up --build
+docker compose exec ollama ollama pull llama3:latest
 ```
 
-Then set `OLLAMA_BASE_URL=http://ollama:11434` in `.env` (or rely on host Ollama at `http://localhost:11434` for host-run services).
+**Port 11434:** the Compose **ollama** container publishes `11434` on the host. Stop any **host** Ollama app that is already using that port, or Docker will fail to bind it.
+
+**Host Ollama instead of the container:** the compose file sets `OLLAMA_BASE_URL=http://ollama:11434` on **ingestion** and **worker** (overrides repo-root `.env` for those keys). To call Ollama on the host while other services stay in Docker, use a compose override or edit that URL—for example `http://host.docker.internal:11434` and omit or stop the **ollama** service so ports do not clash. On **Linux** Docker Engine, `extra_hosts` in the compose file maps `host.docker.internal` via `host-gateway`.
 
 ### LLM and RAG traces in Jaeger
 
@@ -107,8 +110,22 @@ Use this when you want `--reload` on FastAPI or faster frontend iteration while 
    - **Worker:** set `PYTHONPATH` to the repository root, `cd service-worker`, then `python -m worker_app.worker`.
    - **Frontend:** `cd frontend && npm install && npm run dev`.
 
+## Mermaid diagram viewer
+
+If you edit Mermaid code fences in [architecture.md](architecture.md) or [cursor-agent-workflow.md](cursor-agent-workflow.md), regenerate the static HTML viewer from the **repository root**:
+
+```bash
+python scripts/generate_diagram_viewer.py
+```
+
+Then open [diagrams-viewer.html](diagrams-viewer.html) in a browser. CI fails if the committed viewer is out of date relative to those Markdown files.
+
+**Cursor (Agent):** [`.cursor/hooks.json`](../.cursor/hooks.json) runs `afterFileEdit` (Agent **Write** only) → [`scripts/cursor_mermaid_after_file_edit.py`](../scripts/cursor_mermaid_after_file_edit.py), which calls the same generator when one of those two Markdown files is written by the agent. It does **not** run on ordinary manual saves in the editor; if you edit diagrams by hand, run the command above (or let CI remind you on the next PR).
+
 ## Troubleshooting
 
+- **UI shows “LLM unavailable; install Ollama…”** — The **ingestion** container cannot reach the Ollama API or the model is missing. With the default stack, run `docker compose exec ollama ollama pull llama3:latest` (see *Ollama in Compose (default)* above). If you pointed ingestion at **host** Ollama instead, use `http://host.docker.internal:11434` and ensure nothing else binds host port **11434** if the Compose **ollama** service is also enabled.
+- **Worker logs `timed out` on `llm.ollama.generate`** — Large prompts or CPU-only inference can exceed the HTTP client limit. Increase **`OLLAMA_HTTP_TIMEOUT_SECONDS`** in `.env` (default **600** in code after a rebuild) and restart **worker** and **ingestion**.
 - **First `up --build` is slow** — Docker is pulling images and building service images; later runs are faster.
 - **Port already in use** (4566, 8000, 5173, …) — stop the other process or change host ports in `infra/docker-compose.yml` (not recommended unless you know the follow-on env changes).
 - **Terraform or ingestion fails** — from `infra/`, `docker compose logs terraform` or `docker compose logs ingestion` for the failing service.

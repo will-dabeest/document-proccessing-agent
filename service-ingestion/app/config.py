@@ -26,7 +26,14 @@ class Settings(BaseSettings):
         default="http://localhost:11434",
         validation_alias="OLLAMA_BASE_URL",
     )
-    ollama_model: str = Field(default="llama3", validation_alias="OLLAMA_MODEL")
+    ollama_model: str = Field(
+        default="llama3:latest",
+        validation_alias="OLLAMA_MODEL",
+    )
+    ollama_http_timeout_seconds: float = Field(
+        default=600.0,
+        validation_alias="OLLAMA_HTTP_TIMEOUT_SECONDS",
+    )
     otlp_endpoint: str = Field(
         default="localhost:4317",
         validation_alias=AliasChoices("OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"),
@@ -38,6 +45,22 @@ class Settings(BaseSettings):
     embedding_model_name: str = Field(
         default="all-MiniLM-L6-v2",
         validation_alias="EMBEDDING_MODEL_NAME",
+    )
+    url_import_enabled: bool = Field(
+        default=True,
+        validation_alias="URL_IMPORT_ENABLED",
+    )
+    url_import_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        validation_alias="URL_IMPORT_MAX_BYTES",
+    )
+    url_import_max_redirects: int = Field(
+        default=5,
+        validation_alias="URL_IMPORT_MAX_REDIRECTS",
+    )
+    url_import_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias="URL_IMPORT_TIMEOUT_SECONDS",
     )
 
 

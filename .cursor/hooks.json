@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "python scripts/cursor_mermaid_after_file_edit.py",
+        "matcher": "Write"
+      }
+    ]
+  }
+}

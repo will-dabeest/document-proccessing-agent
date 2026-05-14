@@ -13,7 +13,7 @@ def test_generate_llama3_success_returns_stripped_response():
     assert out == "answer text"
     post.assert_called_once()
     call_kw = post.call_args.kwargs
-    assert call_kw["json"]["model"] == "llama3"
+    assert call_kw["json"]["model"] == "llama3:latest"
     assert call_kw["json"]["prompt"] == "my prompt"
     assert call_kw["json"]["stream"] is False
 
@@ -46,5 +46,5 @@ def test_generate_llama3_on_exception_returns_unavailable_message():
         out = generate_llama3("p")
 
     assert out == (
-        "LLM unavailable; install Ollama and pull llama3 for full answers."
+        "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
     )

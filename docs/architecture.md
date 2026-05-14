@@ -4,7 +4,7 @@ This document is the **onboarding map** for the repository: major components, ho
 
 ## System context
 
-The product is a **local-first** stack: a browser UI talks to a FastAPI **ingestion** service, which stores uploads in **S3** and enqueues work on **SQS**. A **worker** polls the queue, reads objects from S3, runs a **LangGraph** flow (LLM classification and summary), writes status to **DynamoDB**, and can notify ingestion to **index** text into **Chroma** for RAG. **Ollama** serves the LLM when enabled (Compose profile `llm` or a host install). **Jaeger** receives OTLP traces from ingestion and the worker.
+The product is a **local-first** stack: a browser UI talks to a FastAPI **ingestion** service, which stores uploads in **S3** and enqueues work on **SQS**. A **worker** polls the queue, reads objects from S3, runs a **LangGraph** flow (LLM classification and summary), writes status to **DynamoDB**, and can notify ingestion to **index** text into **Chroma** for RAG. **Ollama** serves the LLM from a **Docker Compose** service by default (or a host install when you run services on the host). **Jaeger** receives OTLP traces from ingestion and the worker.
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,7 @@ flowchart LR
     SQS[SQS_queue_jobs]
     DDB[DynamoDB_ProcessLog]
   end
-  subgraph optional [Optional]
+  subgraph localLlmRag [Local_LLM_and_RAG]
     Ollama[Ollama_LLM]
     Chroma[Chroma_embeddings]
   end
@@ -48,9 +48,9 @@ Terraform in [infra/main.tf](../infra/main.tf) provisions the AWS-shaped resourc
 
 ## Local deployment (Docker Compose)
 
-Compose ([infra/docker-compose.yml](../infra/docker-compose.yml)) wires **LocalStack** for S3, SQS, DynamoDB, and Secrets Manager, runs **Terraform** once to create resources inside LocalStack, then starts **ingestion**, **worker**, **frontend**, and **Jaeger**. The **ollama** service is optional and gated by profile `llm`.
+Compose ([infra/docker-compose.yml](../infra/docker-compose.yml)) wires **LocalStack** for S3, SQS, DynamoDB, and Secrets Manager, runs **Terraform** once to create resources inside LocalStack, then starts **ingestion**, **worker**, **frontend**, **Jaeger**, and **ollama** (LLM).
 
-Ports and commands are maintained in [local-dev.md](local-dev.md). Typical local ports include **4566** (LocalStack), **8000** (ingestion), **5173** (frontend), **16686** (Jaeger UI), and **11434** (Ollama when the `llm` profile is used).
+Ports and commands are maintained in [local-dev.md](local-dev.md). Typical local ports include **4566** (LocalStack), **8000** (ingestion), **5173** (frontend), **16686** (Jaeger UI), and **11434** (Ollama).
 
 ```mermaid
 flowchart TB
@@ -61,7 +61,7 @@ flowchart TB
     Wk[worker]
     Fe[frontend]
     Jg[jaeger]
-    Ol[ollama_profile_llm]
+    Ol[ollama]
   end
   TFJob --> LS
   Ing --> LS
@@ -194,7 +194,7 @@ Environment variables are loaded via Pydantic settings in [service-ingestion/app
 | Queue and storage | `QUEUE_URL`, `BUCKET_NAME`, `DYNAMODB_TABLE` |
 | Tracing | `OTLP_ENDPOINT` (alias `OTEL_EXPORTER_OTLP_ENDPOINT`) |
 | Worker → ingestion callback | `INGESTION_BASE_URL` |
-| LLM | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`; tests/CI may set `LLM_MOCK_JSON` |
+| LLM | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_HTTP_TIMEOUT_SECONDS`; tests/CI may set `LLM_MOCK_JSON` |
 | RAG / embeddings | `CHROMA_PERSIST_DIR`, `EMBEDDING_MODEL_NAME` |
 | Frontend dev proxy | `INGESTION_PROXY_TARGET` (Vite; see vite.config.js) |
 
