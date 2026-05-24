@@ -2,6 +2,7 @@ import pytest
 
 from app.url_import import (
     UrlImportError,
+    _body_for_storage,
     _classify_body,
     _parse_and_validate_url,
     raise_for_private_or_meta_hosts,
@@ -39,6 +40,34 @@ def test_raise_for_private_blocks_hostname_localhost():
     assert exc.value.status_code == 403
 
 
+def test_raise_for_private_blocks_resolved_private_address(monkeypatch):
+    import socket
+
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.5", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts("docs.example")
+
+    assert exc.value.status_code == 403
+
+
+def test_raise_for_private_resolution_failure_returns_bad_request(monkeypatch):
+    import socket
+
+    def fake_getaddrinfo(*_args, **_kwargs):
+        raise socket.gaierror("no such host")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts("missing.example")
+
+    assert exc.value.status_code == 400
+
+
 def test_classify_pdf_magic_overrides_octet_stream():
     assert _classify_body("application/octet-stream", b"%PDF-1.4\n1 0 obj") == "pdf"
 
@@ -57,3 +86,17 @@ def test_html_to_plain_text_trafilatura_smoke():
     raw = b"<html><body><article><p>UniqueMarkerAlpha beta</p></article></body></html>"
     out = _html_to_plain_text(raw)
     assert b"UniqueMarkerAlpha" in out
+
+
+def test_body_for_storage_preserves_markdown_extension():
+    body, ext = _body_for_storage("text", b"# Title\n", "text/markdown; charset=utf-8")
+
+    assert body == b"# Title\n"
+    assert ext == ".md"
+
+
+def test_body_for_storage_rejects_unknown_binary():
+    with pytest.raises(UrlImportError) as exc:
+        _body_for_storage("unknown_binary", b"PK\x03\x04", "application/zip")
+
+    assert exc.value.status_code == 415
