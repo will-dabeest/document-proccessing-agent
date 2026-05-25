@@ -27,6 +27,12 @@ def test_parse_accepts_https():
     assert port is None
 
 
+def test_parse_rejects_invalid_port():
+    with pytest.raises(UrlImportError) as exc:
+        _parse_and_validate_url("https://example.com:notaport/path")
+    assert exc.value.status_code == 400
+
+
 def test_raise_for_private_blocks_loopback():
     with pytest.raises(UrlImportError) as exc:
         raise_for_private_or_meta_hosts("127.0.0.1")
