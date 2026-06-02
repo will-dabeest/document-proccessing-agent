@@ -152,7 +152,7 @@ def test_fetch_url_document_preserves_markdown_extension(
         FakeResponse(
             200,
             headers={"content-type": "text/markdown; charset=utf-8"},
-            chunks=[b"# Title\n"],
+            chunks=[b"# T\n"],
         )
     ]
 
@@ -160,7 +160,7 @@ def test_fetch_url_document_preserves_markdown_extension(
         fetch_url_document, "https://example.com/doc.md", url_import_settings
     )
 
-    assert body == b"# Title\n"
+    assert body == b"# T\n"
     assert ext == ".md"
     assert fake_async_client.instances[0].requests == [
         ("GET", "https://example.com/doc.md")
