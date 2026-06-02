@@ -68,12 +68,12 @@ class FakeAsyncClient:
 
 @pytest.fixture
 def url_import_settings():
-    return Settings(
-        url_import_enabled=True,
-        url_import_max_bytes=5,
-        url_import_max_redirects=1,
-        url_import_timeout_seconds=0.1,
-    )
+    settings = Settings()
+    settings.url_import_enabled = True
+    settings.url_import_max_bytes = 5
+    settings.url_import_max_redirects = 1
+    settings.url_import_timeout_seconds = 0.1
+    return settings
 
 
 @pytest.fixture
