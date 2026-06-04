@@ -118,7 +118,10 @@ def _parse_and_validate_url(url: str) -> tuple[str, str, int | None]:
     if not host:
         raise UrlImportError(400, "URL must include a host")
 
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError as e:
+        raise UrlImportError(400, "Invalid port") from e
     return raw, host, port
 
 
