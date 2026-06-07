@@ -1,7 +1,11 @@
 """Unit tests for shared.llm_telemetry helpers."""
 
+from unittest.mock import MagicMock
+
 from shared.llm_telemetry import (
+    apply_ollama_response_to_span,
     flatten_distances,
+    log_llm_event,
     ollama_usage_span_attributes,
     rag_distance_stats,
 )
@@ -37,3 +41,61 @@ def test_ollama_usage_span_attributes_extracts_known_keys():
     assert attrs["llm.usage.eval_count"] == 3
     assert attrs["llm.usage.total_duration"] == 1_000_000_000
     assert "bogus" not in attrs
+
+
+def test_apply_ollama_response_to_span_sets_standard_attributes():
+    span = MagicMock()
+
+    apply_ollama_response_to_span(
+        span,
+        response_json={
+            "prompt_eval_count": 10,
+            "eval_count": 3,
+            "total_duration": 1_000_000_000,
+        },
+        latency_ms=12.34567,
+        prompt_char_len=42,
+        model="llama3",
+        http_status_code=200,
+        outcome="ok",
+        stage="rag_answer",
+        context_char_len=1234,
+        rag_n_requested=4,
+        rag_n_returned=2,
+        rag_empty_retrieval=False,
+        rag_distance_min=0.1,
+        rag_distance_max=0.9,
+        rag_distance_mean=0.5,
+        attempts=2,
+    )
+
+    attrs = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+    assert attrs["gen_ai.system"] == "ollama"
+    assert attrs["gen_ai.request.model"] == "llama3"
+    assert attrs["llm.latency_ms"] == 12.346
+    assert attrs["llm.prompt_chars"] == 42
+    assert attrs["llm.outcome"] == "ok"
+    assert attrs["llm.stage"] == "rag_answer"
+    assert attrs["http.status_code"] == 200
+    assert attrs["llm.context_chars"] == 1234
+    assert attrs["rag.n_results_requested"] == 4
+    assert attrs["rag.n_chunks_returned"] == 2
+    assert attrs["rag.empty_retrieval"] is False
+    assert attrs["rag.distance_min"] == 0.1
+    assert attrs["rag.distance_max"] == 0.9
+    assert attrs["rag.distance_mean"] == 0.5
+    assert attrs["llm.attempts"] == 2
+    assert attrs["llm.usage.prompt_eval_count"] == 10
+    assert attrs["llm.usage.eval_count"] == 3
+    assert attrs["llm.usage.total_duration"] == 1_000_000_000
+
+
+def test_log_llm_event_emits_sorted_json_without_none_values():
+    logger = MagicMock()
+
+    log_llm_event(logger, z_field=2, omitted=None, a_field="first")
+
+    logger.info.assert_called_once_with(
+        "llm_event %s",
+        '{"a_field": "first", "z_field": 2}',
+    )
