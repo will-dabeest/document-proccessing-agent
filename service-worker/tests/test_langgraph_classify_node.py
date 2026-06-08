@@ -1,7 +1,7 @@
 """Unit tests for classify_node and _ollama_generate edge cases (mocked LLM)."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -103,6 +103,7 @@ def test_ollama_generate_http_failure_returns_fallback_json():
         llm_mock_json=None,
         ollama_base_url="http://127.0.0.1:9",
         ollama_model="llama3",
+        ollama_http_timeout_seconds=600.0,
     )
     with patch.object(lg, "settings", fake_settings), patch.object(
         lg.httpx, "post", side_effect=ConnectionError("refused")
@@ -119,6 +120,7 @@ def test_classify_node_after_ollama_http_failure_parses_fallback():
         llm_mock_json=None,
         ollama_base_url="http://127.0.0.1:9",
         ollama_model="llama3",
+        ollama_http_timeout_seconds=600.0,
     )
     with patch.object(lg, "settings", fake_settings), patch.object(
         lg.httpx, "post", side_effect=ConnectionError("down")
@@ -127,3 +129,27 @@ def test_classify_node_after_ollama_http_failure_parses_fallback():
 
     assert out["classification"] == "Unknown"
     assert "unavailable" in (out.get("summary") or "").lower()
+
+
+def test_ollama_generate_passes_configured_http_timeout():
+    fake_settings = SimpleNamespace(
+        llm_mock_json=None,
+        ollama_base_url="http://ollama.test:11434",
+        ollama_model="llama3:test",
+        ollama_http_timeout_seconds=123.0,
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"response": "  classified  "}
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", return_value=mock_resp
+    ) as post:
+        out = lg._ollama_generate("prompt")
+
+    assert out == "classified"
+    post.assert_called_once()
+    call_kw = post.call_args.kwargs
+    assert call_kw["json"]["model"] == "llama3:test"
+    assert call_kw["timeout"] == 123.0
