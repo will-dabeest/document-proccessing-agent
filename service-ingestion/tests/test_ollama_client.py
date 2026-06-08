@@ -16,6 +16,7 @@ def test_generate_llama3_success_returns_stripped_response():
     assert call_kw["json"]["model"] == "llama3:latest"
     assert call_kw["json"]["prompt"] == "my prompt"
     assert call_kw["json"]["stream"] is False
+    assert call_kw["timeout"] == 600.0
 
 
 def test_generate_llama3_empty_response_uses_fallback_string():
