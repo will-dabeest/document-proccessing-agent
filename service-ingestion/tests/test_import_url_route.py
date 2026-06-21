@@ -33,7 +33,11 @@ def test_import_url_success(mock_s3):
     assert data["file"].endswith(".txt")
     assert "job_id" in data
     pub.assert_called_once()
+    published_job = pub.call_args.args[0]
+    assert published_job.s3_key == data["file"]
+    assert pub.call_args.kwargs == {"filename": data["file"]}
     idx.assert_called_once()
+    assert idx.call_args.args == (data["job_id"], data["file"], "hello from url")
     mock_s3.upload_fileobj.assert_called_once()
 
 
@@ -63,6 +67,22 @@ def test_import_url_publish_failure_returns_502(mock_s3):
         response = client.post("/import-url", json={"url": "https://example.com/x"})
 
     assert response.status_code == 502
+    assert response.json()["detail"] == "URL content stored but job publish failed"
+
+
+def test_import_url_s3_failure_returns_500_without_publish_or_index(mock_s3):
+    from app.main import app
+
+    mock_s3.upload_fileobj.side_effect = RuntimeError("s3 down")
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document", new=_fetch_text
+    ), patch("app.main.publish_job_safe") as pub, patch("app.main.index_document") as idx:
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/import-url", json={"url": "https://example.com/x"})
+
+    assert response.status_code == 500
+    pub.assert_not_called()
+    idx.assert_not_called()
 
 
 def test_import_url_propagates_url_import_error(mock_s3):
