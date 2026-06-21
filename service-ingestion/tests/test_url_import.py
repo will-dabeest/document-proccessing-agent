@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -137,8 +138,7 @@ def _install_fake_client(monkeypatch, responses):
     return client
 
 
-@pytest.mark.asyncio
-async def test_fetch_revalidates_redirect_target_before_following(monkeypatch):
+def test_fetch_revalidates_redirect_target_before_following(monkeypatch):
     client = _install_fake_client(
         monkeypatch,
         [
@@ -159,15 +159,14 @@ async def test_fetch_revalidates_redirect_target_before_following(monkeypatch):
     monkeypatch.setattr(url_import, "raise_for_private_or_meta_hosts", _validate_host)
 
     with pytest.raises(UrlImportError) as exc:
-        await fetch_url_document("https://example.com/start", _settings())
+        asyncio.run(fetch_url_document("https://example.com/start", _settings()))
 
     assert exc.value.status_code == 403
     assert validated_hosts == ["example.com", "127.0.0.1"]
     assert client.requests == [("GET", "https://example.com/start")]
 
 
-@pytest.mark.asyncio
-async def test_fetch_enforces_streamed_body_limit(monkeypatch):
+def test_fetch_enforces_streamed_body_limit(monkeypatch):
     _install_fake_client(
         monkeypatch,
         [
@@ -181,28 +180,28 @@ async def test_fetch_enforces_streamed_body_limit(monkeypatch):
     monkeypatch.setattr(url_import, "raise_for_private_or_meta_hosts", lambda _host: None)
 
     with pytest.raises(UrlImportError) as exc:
-        await fetch_url_document(
-            "https://example.com/large.txt",
-            _settings(url_import_max_bytes=7),
+        asyncio.run(
+            fetch_url_document(
+                "https://example.com/large.txt",
+                _settings(url_import_max_bytes=7),
+            )
         )
 
     assert exc.value.status_code == 413
 
 
-@pytest.mark.asyncio
-async def test_fetch_maps_remote_http_status_to_bad_gateway(monkeypatch):
+def test_fetch_maps_remote_http_status_to_bad_gateway(monkeypatch):
     _install_fake_client(monkeypatch, [_FakeStreamResponse(404)])
     monkeypatch.setattr(url_import, "raise_for_private_or_meta_hosts", lambda _host: None)
 
     with pytest.raises(UrlImportError) as exc:
-        await fetch_url_document("https://example.com/missing", _settings())
+        asyncio.run(fetch_url_document("https://example.com/missing", _settings()))
 
     assert exc.value.status_code == 502
     assert exc.value.detail == "Remote server returned 404"
 
 
-@pytest.mark.asyncio
-async def test_fetch_preserves_markdown_extension(monkeypatch):
+def test_fetch_preserves_markdown_extension(monkeypatch):
     _install_fake_client(
         monkeypatch,
         [
@@ -215,14 +214,15 @@ async def test_fetch_preserves_markdown_extension(monkeypatch):
     )
     monkeypatch.setattr(url_import, "raise_for_private_or_meta_hosts", lambda _host: None)
 
-    body, ext = await fetch_url_document("https://example.com/readme.md", _settings())
+    body, ext = asyncio.run(
+        fetch_url_document("https://example.com/readme.md", _settings())
+    )
 
     assert body == b"# Title\n\nBody"
     assert ext == ".md"
 
 
-@pytest.mark.asyncio
-async def test_fetch_stops_after_configured_redirect_limit(monkeypatch):
+def test_fetch_stops_after_configured_redirect_limit(monkeypatch):
     _install_fake_client(
         monkeypatch,
         [
@@ -235,9 +235,11 @@ async def test_fetch_stops_after_configured_redirect_limit(monkeypatch):
     monkeypatch.setattr(url_import, "raise_for_private_or_meta_hosts", lambda _host: None)
 
     with pytest.raises(UrlImportError) as exc:
-        await fetch_url_document(
-            "https://example.com/start",
-            _settings(url_import_max_redirects=0),
+        asyncio.run(
+            fetch_url_document(
+                "https://example.com/start",
+                _settings(url_import_max_redirects=0),
+            )
         )
 
     assert exc.value.status_code == 502
