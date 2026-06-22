@@ -1,11 +1,91 @@
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 
 from app.url_import import (
     UrlImportError,
     _classify_body,
     _parse_and_validate_url,
+    fetch_url_document,
     raise_for_private_or_meta_hosts,
 )
+
+
+PUBLIC_DNS_RESULT = [
+    (None, None, None, None, ("93.184.216.34", 443)),
+]
+
+
+class FakeResponse:
+    def __init__(
+        self,
+        status_code=200,
+        headers=None,
+        chunks=None,
+    ):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._chunks = chunks or []
+
+    async def aread(self):
+        return b"".join(self._chunks)
+
+    async def aiter_bytes(self):
+        for chunk in self._chunks:
+            yield chunk
+
+    def raise_for_status(self):
+        return None
+
+
+class FakeStream:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+class FakeAsyncClient:
+    requests = []
+    responses = []
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def stream(self, method, url):
+        self.requests.append((method, url))
+        return FakeStream(self.responses.pop(0))
+
+
+def _url_import_settings(**overrides):
+    values = {
+        "url_import_enabled": True,
+        "url_import_max_bytes": 1024,
+        "url_import_max_redirects": 5,
+        "url_import_timeout_seconds": 1.0,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+@pytest.fixture(autouse=True)
+def reset_fake_client():
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.responses = []
+    yield
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.responses = []
 
 
 def test_parse_rejects_file_scheme():
@@ -25,6 +105,14 @@ def test_parse_accepts_https():
     assert host == "example.com"
     assert "example.com" in raw
     assert port is None
+
+
+def test_parse_invalid_port_returns_url_import_400():
+    with pytest.raises(UrlImportError) as exc:
+        _parse_and_validate_url("https://example.com:99999/path")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Invalid port"
 
 
 def test_raise_for_private_blocks_loopback():
@@ -49,6 +137,54 @@ def test_classify_html():
 
 def test_classify_unknown_binary():
     assert _classify_body("application/zip", b"PK\x03\x04") == "unknown_binary"
+
+
+def test_fetch_url_document_blocks_private_redirect_without_second_get(monkeypatch):
+    monkeypatch.setattr("app.url_import.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        "app.url_import.socket.getaddrinfo",
+        lambda *_a, **_kw: PUBLIC_DNS_RESULT,
+    )
+    FakeAsyncClient.responses = [
+        FakeResponse(
+            status_code=302,
+            headers={"location": "http://169.254.169.254/latest/meta-data/"},
+        )
+    ]
+
+    with pytest.raises(UrlImportError) as exc:
+        asyncio.run(
+            fetch_url_document("https://example.com/start", _url_import_settings())
+        )
+
+    assert exc.value.status_code == 403
+    assert FakeAsyncClient.requests == [("GET", "https://example.com/start")]
+
+
+def test_fetch_url_document_enforces_max_bytes_while_streaming(monkeypatch):
+    monkeypatch.setattr("app.url_import.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        "app.url_import.socket.getaddrinfo",
+        lambda *_a, **_kw: PUBLIC_DNS_RESULT,
+    )
+    FakeAsyncClient.responses = [
+        FakeResponse(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            chunks=[b"hello", b" world"],
+        )
+    ]
+
+    with pytest.raises(UrlImportError) as exc:
+        asyncio.run(
+            fetch_url_document(
+                "https://example.com/large",
+                _url_import_settings(url_import_max_bytes=5),
+            )
+        )
+
+    assert exc.value.status_code == 413
+    assert FakeAsyncClient.requests == [("GET", "https://example.com/large")]
 
 
 def test_html_to_plain_text_trafilatura_smoke():
