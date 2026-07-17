@@ -1,8 +1,9 @@
 """Unit tests for classify_node and _ollama_generate edge cases (mocked LLM)."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 import worker_app.langgraph_flow as lg
@@ -112,6 +113,39 @@ def test_ollama_generate_http_failure_returns_fallback_json():
     data = lg._parse_json_obj(out)
     assert data["classification"] == "Unknown"
     assert "unavailable" in data["summary"].lower()
+
+
+def test_ollama_generate_http_status_error_returns_parseable_fallback():
+    fake_settings = SimpleNamespace(
+        llm_mock_json=None,
+        ollama_base_url="http://ollama.test:11434",
+        ollama_model="llama3:test",
+        ollama_http_timeout_seconds=123.0,
+    )
+    request = httpx.Request("POST", "http://ollama.test:11434/api/generate")
+    error_response = httpx.Response(404, request=request)
+    mock_response = MagicMock(status_code=404)
+    mock_response.json.return_value = {"error": "model not found"}
+    mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "model not found",
+        request=request,
+        response=error_response,
+    )
+
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", return_value=mock_response
+    ) as post, patch.object(lg, "log_llm_event") as log_event:
+        out = lg._ollama_generate("prompt", job_id="job-123")
+
+    assert lg._parse_json_obj(out) == {
+        "classification": "Unknown",
+        "summary": "LLM unavailable.",
+    }
+    assert post.call_args.kwargs["timeout"] == 123.0
+    assert log_event.call_args.kwargs["outcome"] == "http_error"
+    assert log_event.call_args.kwargs["http_status_code"] == 404
+    assert log_event.call_args.kwargs["error"] == "model not found"
+    assert log_event.call_args.kwargs["job_id"] == "job-123"
 
 
 def test_classify_node_after_ollama_http_failure_parses_fallback():
