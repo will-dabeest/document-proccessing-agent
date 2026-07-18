@@ -119,3 +119,16 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+def test_run_once_invalid_job_body_is_not_acknowledged():
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [{"ReceiptHandle": "rh-invalid", "Body": '{"unexpected": true}'}],
+    }
+
+    with patch("worker_app.worker.get_dynamodb_resource") as get_dynamodb:
+        assert run_once(sqs, "http://q") is True
+
+    get_dynamodb.assert_not_called()
+    sqs.delete_message.assert_not_called()
