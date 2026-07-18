@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -55,6 +57,26 @@ def test_try_claim_job_duplicate_done_after_completed():
     jid = "job-done-1"
     save_completed(table, jid, "Legal", "All good")
     assert try_claim_job(table, jid) == "duplicate_done"
+
+
+def test_try_claim_job_reraises_non_conditional_dynamodb_errors():
+    table = MagicMock()
+    error = ClientError(
+        {
+            "Error": {
+                "Code": "ProvisionedThroughputExceededException",
+                "Message": "throttled",
+            }
+        },
+        "PutItem",
+    )
+    table.put_item.side_effect = error
+
+    with pytest.raises(ClientError) as exc_info:
+        try_claim_job(table, "job-throttled")
+
+    assert exc_info.value is error
+    table.get_item.assert_not_called()
 
 
 @mock_aws
