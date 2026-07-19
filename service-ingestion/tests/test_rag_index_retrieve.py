@@ -103,3 +103,36 @@ def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection
         "metadatas",
         "distances",
     ]
+
+
+def test_retrieve_context_handles_empty_chroma_result(fake_model, fake_collection):
+    fake_collection.query.return_value = {
+        "documents": [[]],
+        "metadatas": [[]],
+        "distances": [[]],
+    }
+
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        docs, metas, dists = retrieve_context("Unknown topic")
+
+    assert docs == []
+    assert metas == []
+    assert dists == []
+
+
+def test_retrieve_context_allows_omitted_distances(fake_model, fake_collection):
+    fake_collection.query.return_value = {
+        "documents": [["relevant chunk"]],
+        "metadatas": [[{"file": "policy.txt"}]],
+    }
+
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        docs, metas, dists = retrieve_context("What is the policy?")
+
+    assert docs == ["relevant chunk"]
+    assert metas == [{"file": "policy.txt"}]
+    assert dists == []
