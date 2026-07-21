@@ -65,6 +65,21 @@ def test_import_url_publish_failure_returns_502(mock_s3):
     assert response.status_code == 502
 
 
+def test_import_url_storage_failure_skips_publish_and_index(mock_s3):
+    from app.main import app
+
+    mock_s3.upload_fileobj.side_effect = RuntimeError("s3 down")
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document", new=_fetch_text
+    ), patch("app.main.publish_job_safe") as pub, patch("app.main.index_document") as idx:
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/import-url", json={"url": "https://example.com/x"})
+
+    assert response.status_code == 500
+    pub.assert_not_called()
+    idx.assert_not_called()
+
+
 def test_import_url_propagates_url_import_error(mock_s3):
     from app.main import app
     from app.url_import import UrlImportError
