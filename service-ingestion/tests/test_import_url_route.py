@@ -88,8 +88,15 @@ def test_import_url_disabled_returns_403(mock_s3):
 
     with patch.object(config.settings, "url_import_enabled", False), patch(
         "app.main.get_s3_client", return_value=mock_s3
-    ), patch("app.main.publish_job_safe"), patch("app.main.index_document"):
+    ) as get_s3, patch("app.main.publish_job_safe") as pub, patch(
+        "app.main.index_document"
+    ) as idx:
         client = TestClient(app)
         response = client.post("/import-url", json={"url": "https://example.com/x"})
 
     assert response.status_code == 403
+    assert response.json()["detail"] == "URL import is disabled"
+    get_s3.assert_not_called()
+    mock_s3.upload_fileobj.assert_not_called()
+    pub.assert_not_called()
+    idx.assert_not_called()
