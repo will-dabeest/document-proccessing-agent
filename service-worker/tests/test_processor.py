@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -101,6 +102,66 @@ def test_process_job_body_empty_extract_skips_notify_index():
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
     ni.assert_not_called()
+
+
+def test_process_job_body_download_failure_stops_processing():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes",
+        side_effect=RuntimeError("s3 unavailable"),
+    ), patch("worker_app.processor.extract_text_from_object") as extract, patch(
+        "worker_app.processor.run_agent"
+    ) as ra, patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        with pytest.raises(RuntimeError, match="s3 unavailable"):
+            process_job_body("job-download", "missing.txt", tbl)
+
+    extract.assert_not_called()
+    ra.assert_not_called()
+    sc.assert_not_called()
+    ni.assert_not_called()
+
+
+def test_process_job_body_agent_failure_skips_completion_and_indexing():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"document"
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value="document"
+    ), patch(
+        "worker_app.processor.run_agent", side_effect=RuntimeError("agent failed")
+    ), patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        with pytest.raises(RuntimeError, match="agent failed"):
+            process_job_body("job-agent", "document.txt", tbl)
+
+    sc.assert_not_called()
+    ni.assert_not_called()
+
+
+def test_process_job_body_defaults_missing_agent_fields():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"document"
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value="document"
+    ), patch(
+        "worker_app.processor.run_agent", return_value={}
+    ), patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        process_job_body("job-defaults", "document.txt", tbl)
+
+    sc.assert_called_once_with(tbl, "job-defaults", "Unknown", "")
+    ni.assert_called_once_with("job-defaults", "document.txt", "document")
 
 
 @mock_aws
