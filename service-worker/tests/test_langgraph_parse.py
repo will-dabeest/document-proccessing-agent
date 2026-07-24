@@ -17,6 +17,18 @@ def test_parse_json_obj_embedded_in_prose():
     assert lg._parse_json_obj(raw) == {"classification": "X", "summary": "Y"}
 
 
+def test_parse_json_obj_from_markdown_fence():
+    raw = """Here is the result:
+```json
+{"classification": "Legal", "summary": "Contract review."}
+```
+"""
+    assert lg._parse_json_obj(raw) == {
+        "classification": "Legal",
+        "summary": "Contract review.",
+    }
+
+
 def test_parse_json_obj_malformed_raises():
     with pytest.raises(json.JSONDecodeError):
         lg._parse_json_obj("this is not json")

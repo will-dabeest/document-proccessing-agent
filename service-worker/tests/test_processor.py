@@ -29,6 +29,19 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_pdf_uppercase_extension_and_null_page_text():
+    page_with_text = MagicMock()
+    page_with_text.extract_text.return_value = "Page one"
+    page_without_text = MagicMock()
+    page_without_text.extract_text.return_value = None
+    mock_reader = MagicMock()
+    mock_reader.pages = [page_with_text, page_without_text]
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader) as reader:
+        out = extract_text_from_object("REPORT.PDF", b"%PDF-1.4 dummy")
+    reader.assert_called_once()
+    assert out == "Page one"
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(

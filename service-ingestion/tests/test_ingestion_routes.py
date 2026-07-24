@@ -74,6 +74,37 @@ def test_ask_endpoint_ollama_failure_returns_fallback_answer():
     )
 
 
+def test_ask_endpoint_ollama_http_status_error_returns_fallback_answer():
+    from app.main import app
+    import httpx
+
+    request = httpx.Request("POST", "http://localhost:11434/api/generate")
+    error_response = httpx.Response(404, request=request)
+    mock_resp = MagicMock(status_code=404)
+    mock_resp.json.return_value = {"error": "model not found"}
+    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "model not found",
+        request=request,
+        response=error_response,
+    )
+
+    with patch("app.ollama_client.httpx.post", return_value=mock_resp), patch(
+        "app.rag_service.retrieve_context",
+        return_value=(["policy context"], [{"file": "a.txt"}], []),
+    ):
+        client = TestClient(app)
+        response = client.post("/ask", json={"question": "What is the policy?"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer"] == (
+        "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
+    )
+    assert data["snippets"] == [
+        {"text": "policy context", "metadata": {"file": "a.txt"}}
+    ]
+
+
 def test_documents_maps_dynamo_scan_items():
     from app.main import app
 
@@ -106,6 +137,40 @@ def test_documents_maps_dynamo_scan_items():
         },
     ]
     mock_resource.Table.assert_called_once()
+
+
+def test_documents_maps_partial_dynamo_items_without_optional_fields():
+    from app.main import app
+
+    mock_table = MagicMock()
+    mock_table.scan.return_value = {
+        "Items": [
+            {"MessageId": "processing-1", "Status": "Processing"},
+            {},
+        ],
+    }
+    mock_resource = MagicMock()
+    mock_resource.Table.return_value = mock_table
+
+    with patch("app.main.get_dynamodb_resource", return_value=mock_resource):
+        client = TestClient(app)
+        response = client.get("/documents")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "message_id": "processing-1",
+            "status": "Processing",
+            "classification": None,
+            "summary": None,
+        },
+        {
+            "message_id": None,
+            "status": None,
+            "classification": None,
+            "summary": None,
+        },
+    ]
 
 
 def test_upload_s3_failure_returns_500():
