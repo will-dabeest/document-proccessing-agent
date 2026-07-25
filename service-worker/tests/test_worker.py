@@ -19,6 +19,27 @@ def test_extract_trace_from_message_with_traceparent():
     assert ctx is not None
 
 
+def test_extract_trace_from_message_non_dict_traceparent_falls_back():
+    """Malformed attribute shapes must not crash; fall back to the current context."""
+    from opentelemetry import context as otel_context
+
+    current = otel_context.get_current()
+    ctx = extract_trace_from_message(
+        {"MessageAttributes": {"traceparent": "00-not-a-dict-shape"}}
+    )
+    assert ctx is current
+
+
+def test_extract_trace_from_message_blank_string_value_falls_back():
+    from opentelemetry import context as otel_context
+
+    current = otel_context.get_current()
+    ctx = extract_trace_from_message(
+        {"MessageAttributes": {"traceparent": {"StringValue": ""}}}
+    )
+    assert ctx is current
+
+
 def test_handle_message_duplicate_done_skips_process():
     body = json.dumps(
         {

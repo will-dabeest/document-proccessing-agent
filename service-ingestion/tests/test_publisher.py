@@ -58,6 +58,37 @@ def test_publish_job_includes_traceparent_when_carrier_provided(sqs_queue_url):
     assert attrs["traceparent"]["DataType"] == "String"
 
 
+def test_publish_job_omits_traceparent_when_carrier_empty(sqs_queue_url):
+    """Empty/missing traceparent must not publish a blank SQS message attribute."""
+    url, client = sqs_queue_url
+    job = JobMessage(s3_key="b.txt", idempotency_key="id-201", uploaded_at="2024-01-02T00:00:00+00:00")
+    publish_job(job, trace_carrier={})
+
+    resp = client.receive_message(
+        QueueUrl=url,
+        MaxNumberOfMessages=1,
+        MessageAttributeNames=["All"],
+    )
+    body = json.loads(resp["Messages"][0]["Body"])
+    assert body == job.to_json_dict()
+    attrs = resp["Messages"][0].get("MessageAttributes") or {}
+    assert "traceparent" not in attrs
+
+
+def test_publish_job_omits_traceparent_when_value_blank(sqs_queue_url):
+    url, client = sqs_queue_url
+    job = JobMessage(s3_key="c.txt", idempotency_key="id-202", uploaded_at="2024-01-02T00:00:00+00:00")
+    publish_job(job, trace_carrier={"traceparent": ""})
+
+    resp = client.receive_message(
+        QueueUrl=url,
+        MaxNumberOfMessages=1,
+        MessageAttributeNames=["All"],
+    )
+    attrs = resp["Messages"][0].get("MessageAttributes") or {}
+    assert "traceparent" not in attrs
+
+
 def test_publish_job_safe_propagates_send_failure():
     job = JobMessage(s3_key="x.txt", idempotency_key="id-300", uploaded_at="2024-01-03T00:00:00+00:00")
     mock_sqs = MagicMock()
