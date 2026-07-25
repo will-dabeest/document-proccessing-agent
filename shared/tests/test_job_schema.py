@@ -1,4 +1,6 @@
 import json
+from datetime import datetime, timezone
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +14,23 @@ def test_job_message_roundtrip():
     j2 = parse_job_message(s)
     assert j2.s3_key == "a.pdf"
     assert j2.idempotency_key == "abc"
+
+
+def test_job_message_defaults_generate_idempotency_and_uploaded_at():
+    """Upload/import construct JobMessage(s3_key=...) and rely on default factories."""
+    before = datetime.now(timezone.utc)
+    j1 = JobMessage(s3_key="only-key.txt")
+    j2 = JobMessage(s3_key="only-key.txt")
+    after = datetime.now(timezone.utc)
+
+    assert j1.s3_key == "only-key.txt"
+    UUID(j1.idempotency_key)
+    UUID(j2.idempotency_key)
+    assert j1.idempotency_key != j2.idempotency_key
+
+    uploaded = datetime.fromisoformat(j1.uploaded_at)
+    assert uploaded.tzinfo is not None
+    assert before <= uploaded <= after
 
 
 def test_parse_job_message_invalid_json_raises():

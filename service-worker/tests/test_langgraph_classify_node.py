@@ -79,6 +79,39 @@ def test_classify_node_missing_keys_use_defaults():
     assert out["summary"] == ""
 
 
+def test_classify_node_truncates_document_text_to_8000_chars():
+    """Long documents must be clipped before the classify prompt is sent to Ollama."""
+    doc = ("HEAD" + ("x" * 7992) + "TAIL_SHOULD_NOT_APPEAR")  # 4 + 7992 + 22 = 8018
+    assert len(doc) > 8000
+    prompts: list[str] = []
+
+    def fake_generate(prompt: str, **_kwargs: object) -> str:
+        prompts.append(prompt)
+        return '{"classification": "Long", "summary": "ok"}'
+
+    with patch.object(lg, "_ollama_generate", side_effect=fake_generate):
+        out = lg.classify_node({"document_text": doc, "attempts": 0})
+
+    assert out["classification"] == "Long"
+    assert len(prompts) == 1
+    clipped = doc[:8000]
+    assert clipped in prompts[0]
+    assert "TAIL_SHOULD_NOT_APPEAR" not in prompts[0]
+    assert doc not in prompts[0]
+
+
+def test_classify_node_unknown_summary_truncated_to_500_chars():
+    long_raw = "z" * 720
+    with patch.object(lg, "_ollama_generate", return_value=long_raw) as gen:
+        out = lg.classify_node({"document_text": "d", "attempts": 2})
+
+    gen.assert_called_once()
+    assert out["classification"] == "Unknown"
+    assert out["summary"] == "z" * 500
+    assert len(out["summary"]) == 500
+    assert out["attempts"] == 3
+
+
 def test_ollama_generate_uses_mock_json_when_set(monkeypatch):
     monkeypatch.setenv("LLM_MOCK_JSON", '{"classification": "M", "summary": "S"}')
     import importlib
