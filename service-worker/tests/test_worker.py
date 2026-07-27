@@ -4,7 +4,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from worker_app.tracing import extract_trace_from_message
-from worker_app.worker import handle_message, run_once
+from worker_app.worker import _normalize_otlp_endpoint, handle_message, run_once
+
+
+def test_normalize_otlp_endpoint_strips_schemes_and_whitespace():
+    assert _normalize_otlp_endpoint("https://jaeger:4317") == "jaeger:4317"
+    assert _normalize_otlp_endpoint("http://localhost:4317") == "localhost:4317"
+    assert _normalize_otlp_endpoint("localhost:4317") == "localhost:4317"
+    assert _normalize_otlp_endpoint("  https://collector:4317  ") == "collector:4317"
 
 
 def test_extract_trace_from_message_without_traceparent():
