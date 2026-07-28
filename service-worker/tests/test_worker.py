@@ -4,7 +4,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from worker_app.tracing import extract_trace_from_message
-from worker_app.worker import handle_message, run_once
+from worker_app.worker import _configure_tracing, handle_message, run_once
+
+
+def test_configure_tracing_soft_fails_when_exporter_init_raises(caplog):
+    with patch(
+        "worker_app.worker.OTLPSpanExporter",
+        side_effect=RuntimeError("otlp unavailable"),
+    ):
+        _configure_tracing()
+
+    assert any("tracing_init_failed" in r.message for r in caplog.records)
 
 
 def test_extract_trace_from_message_without_traceparent():
