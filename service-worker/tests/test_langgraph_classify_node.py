@@ -114,6 +114,41 @@ def test_ollama_generate_http_failure_returns_fallback_json():
     assert "unavailable" in data["summary"].lower()
 
 
+def test_ollama_generate_transport_exception_records_exception_outcome():
+    """Transport failures (not HTTP status) must emit outcome=exception telemetry."""
+    fake_settings = SimpleNamespace(
+        llm_mock_json=None,
+        ollama_base_url="http://127.0.0.1:9",
+        ollama_model="llama3",
+        ollama_http_timeout_seconds=12.0,
+    )
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", side_effect=ConnectionError("refused")
+    ) as post, patch.object(lg, "apply_ollama_response_to_span") as apply_span, patch.object(
+        lg, "log_llm_event"
+    ) as log_event:
+        out = lg._ollama_generate(
+            "classify me",
+            stage="worker.classify",
+            attempts=1,
+            job_id="job-ex-1",
+        )
+
+    data = lg._parse_json_obj(out)
+    assert data["classification"] == "Unknown"
+    assert "unavailable" in data["summary"].lower()
+    assert post.call_args.kwargs["timeout"] == 12.0
+    assert apply_span.call_args.kwargs["outcome"] == "exception"
+    assert apply_span.call_args.kwargs["stage"] == "worker.classify"
+    assert apply_span.call_args.kwargs["attempts"] == 1
+    assert apply_span.call_args.kwargs["http_status_code"] is None
+    assert log_event.call_args.kwargs["outcome"] == "exception"
+    assert log_event.call_args.kwargs["llm_stage"] == "worker.classify"
+    assert log_event.call_args.kwargs["job_id"] == "job-ex-1"
+    assert log_event.call_args.kwargs["llm_attempts"] == 1
+    assert "refused" in str(log_event.call_args.kwargs["error"])
+
+
 def test_classify_node_after_ollama_http_failure_parses_fallback():
     fake_settings = SimpleNamespace(
         llm_mock_json=None,
