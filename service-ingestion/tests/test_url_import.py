@@ -39,6 +39,31 @@ def test_raise_for_private_blocks_hostname_localhost():
     assert exc.value.status_code == 403
 
 
+@pytest.mark.parametrize(
+    "hostname",
+    [
+        "224.0.0.1",  # multicast
+        "ff02::1",  # IPv6 link-local multicast
+        "fc00::1",  # IPv6 unique local
+        "[fc00::1]",
+    ],
+)
+def test_raise_for_private_blocks_multicast_and_ula(hostname):
+    """Cover SSRF host classes beyond loopback/RFC1918 already asserted on main."""
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(hostname)
+    assert exc.value.status_code == 403
+    assert "disallowed" in exc.value.detail.lower()
+
+
+def test_parse_rejects_javascript_and_ftp_schemes():
+    for url in ("javascript:alert(1)", "ftp://example.com/a.txt"):
+        with pytest.raises(UrlImportError) as exc:
+            _parse_and_validate_url(url)
+        assert exc.value.status_code == 400
+        assert "http" in exc.value.detail.lower()
+
+
 def test_classify_pdf_magic_overrides_octet_stream():
     assert _classify_body("application/octet-stream", b"%PDF-1.4\n1 0 obj") == "pdf"
 
