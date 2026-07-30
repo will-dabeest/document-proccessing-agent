@@ -1,7 +1,8 @@
 """Unit tests for classify_node and _ollama_generate edge cases (mocked LLM)."""
 
+from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,6 +16,60 @@ def test_classify_node_valid_json_first_call():
     assert out["classification"] == "Legal"
     assert out["summary"] == "Contract terms."
     assert out["attempts"] == 0
+
+
+def test_classify_node_sets_graph_span_attributes_when_job_context_present():
+    raw = '{"classification": "Legal", "summary": "Contract terms."}'
+    span = MagicMock()
+
+    @contextmanager
+    def fake_span(_name: str):
+        yield span
+
+    with patch.object(lg, "tracer") as tracer, patch.object(
+        lg, "_ollama_generate", return_value=raw
+    ) as gen:
+        tracer.start_as_current_span.side_effect = fake_span
+        out = lg.classify_node(
+            {
+                "document_text": "Some doc",
+                "attempts": 2,
+                "job_id": "job-42",
+                "s3_key": "docs/a.txt",
+            }
+        )
+
+    tracer.start_as_current_span.assert_called_once_with("llm.graph.classify")
+    attrs = {c.args[0]: c.args[1] for c in span.set_attribute.call_args_list}
+    assert attrs["llm.stage"] == "worker.classify"
+    assert attrs["job_id"] == "job-42"
+    assert attrs["s3.key"] == "docs/a.txt"
+    assert attrs["llm.attempts"] == 2
+    gen.assert_called_once()
+    assert gen.call_args.kwargs["job_id"] == "job-42"
+    assert out["classification"] == "Legal"
+
+
+def test_classify_node_omits_optional_graph_span_attributes_when_absent():
+    raw = '{"classification": "General", "summary": ""}'
+    span = MagicMock()
+
+    @contextmanager
+    def fake_span(_name: str):
+        yield span
+
+    with patch.object(lg, "tracer") as tracer, patch.object(
+        lg, "_ollama_generate", return_value=raw
+    ) as gen:
+        tracer.start_as_current_span.side_effect = fake_span
+        lg.classify_node({"document_text": "x"})
+
+    attrs = {c.args[0]: c.args[1] for c in span.set_attribute.call_args_list}
+    assert attrs["llm.stage"] == "worker.classify"
+    assert attrs["llm.attempts"] == 0
+    assert "job_id" not in attrs
+    assert "s3.key" not in attrs
+    assert gen.call_args.kwargs["job_id"] is None
 
 
 def test_classify_node_valid_json_preserves_prior_attempts():
