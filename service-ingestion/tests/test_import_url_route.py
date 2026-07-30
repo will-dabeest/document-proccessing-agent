@@ -74,7 +74,7 @@ def test_import_url_sync_index_failure_after_durable_side_effects(mock_s3):
     ), patch("app.main.publish_job_safe") as pub, patch(
         "app.main.index_document", side_effect=RuntimeError("chroma down")
     ):
-        client = TestClient(app)
+        client = TestClient(app, raise_server_exceptions=False)
         response = client.post("/import-url", json={"url": "https://example.com/doc"})
 
     assert response.status_code == 500

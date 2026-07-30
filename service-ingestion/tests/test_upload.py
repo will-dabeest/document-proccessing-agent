@@ -48,7 +48,7 @@ def test_upload_sync_index_failure_after_durable_side_effects():
     ) as pub, patch(
         "app.main.index_document", side_effect=RuntimeError("chroma down")
     ):
-        client = TestClient(app)
+        client = TestClient(app, raise_server_exceptions=False)
         response = client.post(
             "/upload",
             files={"file": ("notes.txt", b"hello durable", "text/plain")},

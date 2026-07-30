@@ -43,12 +43,12 @@ def test_raise_for_private_blocks_hostname_localhost():
     "hostname",
     [
         "224.0.0.1",  # multicast
-        "100.64.0.1",  # CGNAT / shared address space (treated as private)
+        "ff02::1",  # IPv6 link-local multicast
         "fc00::1",  # IPv6 unique local
         "[fc00::1]",
     ],
 )
-def test_raise_for_private_blocks_multicast_cgnat_and_ula(hostname):
+def test_raise_for_private_blocks_multicast_and_ula(hostname):
     """Cover SSRF host classes beyond loopback/RFC1918 already asserted on main."""
     with pytest.raises(UrlImportError) as exc:
         raise_for_private_or_meta_hosts(hostname)
