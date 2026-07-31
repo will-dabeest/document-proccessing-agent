@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -29,6 +30,22 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_pdf_magic_under_non_pdf_key_returns_empty():
+    # Extension drives the decode path; PDF bytes under .txt never hit PdfReader.
+    with patch("worker_app.processor.PdfReader") as reader:
+        out = extract_text_from_object("notes.txt", b"%PDF-1.4\n\xff\xfe binary")
+    assert out == ""
+    reader.assert_not_called()
+
+
+def test_extract_text_corrupt_pdf_propagates_reader_error():
+    with patch(
+        "worker_app.processor.PdfReader", side_effect=ValueError("invalid pdf")
+    ):
+        with pytest.raises(ValueError, match="invalid pdf"):
+            extract_text_from_object("broken.pdf", b"not-a-pdf")
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(
@@ -55,6 +72,32 @@ def test_try_claim_job_duplicate_done_after_completed():
     jid = "job-done-1"
     save_completed(table, jid, "Legal", "All good")
     assert try_claim_job(table, jid) == "duplicate_done"
+
+
+@mock_aws
+def test_try_claim_job_missing_status_is_duplicate_inflight():
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName="ProcessLog",
+        KeySchema=[{"AttributeName": "MessageId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "MessageId", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("ProcessLog")
+    table.put_item(Item={"MessageId": "job-no-status"})
+    assert try_claim_job(table, "job-no-status") == "duplicate_inflight"
+
+
+@mock_aws
+def test_try_claim_job_failed_status_is_duplicate_inflight():
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName="ProcessLog",
+        KeySchema=[{"AttributeName": "MessageId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "MessageId", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("ProcessLog")
+    table.put_item(Item={"MessageId": "job-failed", "Status": "Failed"})
+    assert try_claim_job(table, "job-failed") == "duplicate_inflight"
 
 
 @mock_aws
@@ -100,6 +143,26 @@ def test_process_job_body_empty_extract_skips_notify_index():
         process_job_body("job-y", "empty.bin", tbl)
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
+    ni.assert_not_called()
+
+
+def test_process_job_body_pdf_extract_failure_skips_save_and_notify():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"not-a-pdf"
+    ), patch(
+        "worker_app.processor.extract_text_from_object",
+        side_effect=ValueError("invalid pdf"),
+    ), patch("worker_app.processor.run_agent") as ra, patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        with pytest.raises(ValueError, match="invalid pdf"):
+            process_job_body("job-pdf-fail", "broken.pdf", tbl)
+
+    ra.assert_not_called()
+    sc.assert_not_called()
     ni.assert_not_called()
 
 
