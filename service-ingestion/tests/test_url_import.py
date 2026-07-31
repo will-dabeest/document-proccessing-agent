@@ -43,6 +43,11 @@ def test_classify_pdf_magic_overrides_octet_stream():
     assert _classify_body("application/octet-stream", b"%PDF-1.4\n1 0 obj") == "pdf"
 
 
+def test_classify_pdf_magic_overrides_html_content_type():
+    # Magic bytes win over a misleading Content-Type so PDFs are not HTML-normalized.
+    assert _classify_body("text/html; charset=utf-8", b"%PDF-1.4\n1 0 obj") == "pdf"
+
+
 def test_classify_html():
     assert _classify_body("text/html; charset=utf-8", b"<html></html>") == "html"
 
