@@ -127,11 +127,15 @@ def test_process_job_body_whitespace_only_extract_still_notifies_index():
 
 @mock_aws
 def test_download_object_bytes_reads_bucket_key(monkeypatch):
-    import worker_app.config as cfg
+    # langgraph mock tests reload worker_app.config, which can leave aws_clients /
+    # processor holding stale Settings instances — patch the imported refs directly.
+    import worker_app.aws_clients as aws_clients
+    import worker_app.processor as processor_mod
 
-    monkeypatch.setattr(cfg.settings, "use_localstack", False)
-    monkeypatch.setattr(cfg.settings, "bucket_name", "doc-storage")
-    monkeypatch.setattr(cfg.settings, "aws_region", "us-east-1")
+    monkeypatch.setattr(aws_clients.settings, "use_localstack", False)
+    monkeypatch.setattr(aws_clients.settings, "bucket_name", "doc-storage")
+    monkeypatch.setattr(aws_clients.settings, "aws_region", "us-east-1")
+    monkeypatch.setattr(processor_mod.settings, "bucket_name", "doc-storage")
 
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket="doc-storage")
