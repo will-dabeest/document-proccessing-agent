@@ -1,7 +1,9 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import boto3
 import pytest
+from moto import mock_aws
 
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
@@ -119,3 +121,48 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+@mock_aws
+def test_stuck_processing_claim_blocks_ack_on_redelivery(monkeypatch):
+    """Failed process after claim leaves Status=Processing; redelivery must not delete."""
+    import worker_app.config as cfg
+
+    monkeypatch.setattr(cfg.settings, "use_localstack", False)
+    monkeypatch.setattr(cfg.settings, "dynamodb_table", "ProcessLog")
+    monkeypatch.setattr(cfg.settings, "aws_region", "us-east-1")
+
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName="ProcessLog",
+        KeySchema=[{"AttributeName": "MessageId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "MessageId", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("ProcessLog")
+    job_id = "job-stuck-1"
+    body = json.dumps(
+        {
+            "s3_key": "stuck.txt",
+            "idempotency_key": job_id,
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    msg = {"Body": body, "ReceiptHandle": "rh-stuck"}
+
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.process_job_body",
+        side_effect=RuntimeError("extract failed"),
+    ) as proc:
+        gr.return_value.Table.return_value = table
+        with pytest.raises(RuntimeError, match="extract failed"):
+            handle_message(msg)
+
+        assert table.get_item(Key={"MessageId": job_id})["Item"]["Status"] == "Processing"
+        assert proc.call_count == 1
+
+        sqs = MagicMock()
+        sqs.receive_message.return_value = {"Messages": [msg]}
+        assert run_once(sqs, "http://q") is True
+        sqs.delete_message.assert_not_called()
+        assert proc.call_count == 1
+        assert table.get_item(Key={"MessageId": job_id})["Item"]["Status"] == "Processing"
