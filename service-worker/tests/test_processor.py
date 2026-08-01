@@ -4,6 +4,7 @@ import boto3
 from moto import mock_aws
 
 from worker_app.processor import (
+    download_object_bytes,
     extract_text_from_object,
     process_job_body,
     save_completed,
@@ -101,6 +102,48 @@ def test_process_job_body_empty_extract_skips_notify_index():
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
     ni.assert_not_called()
+
+
+def test_process_job_body_whitespace_only_extract_still_notifies_index():
+    """Whitespace is truthy in process_job_body but index_document strips and no-ops."""
+    tbl = MagicMock()
+    whitespace = "  \n\t  "
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=whitespace.encode()
+    ), patch(
+        "worker_app.processor.run_agent",
+        return_value={"classification": "Unknown", "summary": "blank"},
+    ) as ra, patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        process_job_body("job-ws", "spaces.txt", tbl)
+
+    assert ra.call_args[0][0]["document_text"] == whitespace
+    sc.assert_called_once_with(tbl, "job-ws", "Unknown", "blank")
+    ni.assert_called_once_with("job-ws", "spaces.txt", whitespace)
+
+
+@mock_aws
+def test_download_object_bytes_reads_bucket_key(monkeypatch):
+    # langgraph mock tests reload worker_app.config, which can leave aws_clients /
+    # processor holding stale Settings instances — patch the imported refs directly.
+    import worker_app.aws_clients as aws_clients
+    import worker_app.processor as processor_mod
+
+    monkeypatch.setattr(aws_clients.settings, "use_localstack", False)
+    monkeypatch.setattr(aws_clients.settings, "bucket_name", "doc-storage")
+    monkeypatch.setattr(aws_clients.settings, "aws_region", "us-east-1")
+    monkeypatch.setattr(processor_mod.settings, "bucket_name", "doc-storage")
+
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="doc-storage")
+    key = "uploads/nested/sample.txt"
+    payload = b"downloaded-bytes"
+    s3.put_object(Bucket="doc-storage", Key=key, Body=payload)
+
+    assert download_object_bytes(key) == payload
 
 
 @mock_aws
