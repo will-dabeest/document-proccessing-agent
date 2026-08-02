@@ -5,6 +5,7 @@ from moto import mock_aws
 
 from worker_app.processor import (
     extract_text_from_object,
+    notify_index,
     process_job_body,
     save_completed,
     try_claim_job,
@@ -101,6 +102,24 @@ def test_process_job_body_empty_extract_skips_notify_index():
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
     ni.assert_not_called()
+
+
+def test_notify_index_http_non_2xx_does_not_raise():
+    """httpx does not raise on 5xx unless raise_for_status; notify must stay soft."""
+    fake_resp = MagicMock()
+    fake_resp.status_code = 503
+    with patch("worker_app.processor.settings") as settings, patch(
+        "httpx.post", return_value=fake_resp
+    ) as post:
+        settings.ingestion_base_url = "http://ingestion:8000/"
+        notify_index("job-n", "doc.txt", "indexed text")
+    post.assert_called_once()
+    assert post.call_args.args[0] == "http://ingestion:8000/internal/index"
+    assert post.call_args.kwargs["json"] == {
+        "job_id": "job-n",
+        "filename": "doc.txt",
+        "text": "indexed text",
+    }
 
 
 @mock_aws

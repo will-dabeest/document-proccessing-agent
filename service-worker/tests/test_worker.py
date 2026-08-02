@@ -78,6 +78,93 @@ def test_handle_message_claimed_runs_process():
     proc.assert_called_once_with("jid-3", "g.txt", tbl)
 
 
+def _stub_tracer_span():
+    """Avoid nested OTEL attach/detach from start_as_current_span during token tests."""
+    span_cm = MagicMock()
+    span_cm.__enter__ = MagicMock(return_value=MagicMock())
+    span_cm.__exit__ = MagicMock(return_value=False)
+    tracer = MagicMock()
+    tracer.start_as_current_span.return_value = span_cm
+    return tracer
+
+
+def test_handle_message_detaches_otel_context_on_success():
+    body = json.dumps(
+        {
+            "s3_key": "g.txt",
+            "idempotency_key": "jid-otel-ok",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    token = object()
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="claimed"
+    ), patch("worker_app.worker.process_job_body"), patch(
+        "worker_app.worker.trace.get_tracer", return_value=_stub_tracer_span()
+    ), patch(
+        "worker_app.worker.otel_context.attach", return_value=token
+    ) as attach, patch(
+        "worker_app.worker.otel_context.detach"
+    ) as detach:
+        gr.return_value.Table.return_value = MagicMock()
+        handle_message({"Body": body})
+
+    attach.assert_called_once()
+    detach.assert_called_once_with(token)
+
+
+def test_handle_message_detaches_otel_context_on_inflight_raise():
+    body = json.dumps(
+        {
+            "s3_key": "g.txt",
+            "idempotency_key": "jid-otel-inflight",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    token = object()
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="duplicate_inflight"
+    ), patch(
+        "worker_app.worker.trace.get_tracer", return_value=_stub_tracer_span()
+    ), patch(
+        "worker_app.worker.otel_context.attach", return_value=token
+    ), patch(
+        "worker_app.worker.otel_context.detach"
+    ) as detach:
+        gr.return_value.Table.return_value = MagicMock()
+        with pytest.raises(RuntimeError, match="duplicate_inflight_retry"):
+            handle_message({"Body": body})
+
+    detach.assert_called_once_with(token)
+
+
+def test_handle_message_detaches_otel_context_when_process_fails():
+    body = json.dumps(
+        {
+            "s3_key": "g.txt",
+            "idempotency_key": "jid-otel-fail",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    token = object()
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="claimed"
+    ), patch(
+        "worker_app.worker.process_job_body", side_effect=RuntimeError("s3 boom")
+    ), patch(
+        "worker_app.worker.trace.get_tracer", return_value=_stub_tracer_span()
+    ), patch(
+        "worker_app.worker.otel_context.attach", return_value=token
+    ), patch(
+        "worker_app.worker.otel_context.detach"
+    ) as detach:
+        gr.return_value.Table.return_value = MagicMock()
+        with pytest.raises(RuntimeError, match="s3 boom"):
+            handle_message({"Body": body})
+
+    detach.assert_called_once_with(token)
+
+
 def test_run_once_false_when_no_messages():
     sqs = MagicMock()
     sqs.receive_message.return_value = {}

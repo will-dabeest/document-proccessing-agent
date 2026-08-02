@@ -79,6 +79,23 @@ def test_classify_node_missing_keys_use_defaults():
     assert out["summary"] == ""
 
 
+def test_classify_node_null_fields_coerce_via_str():
+    """Present-but-null JSON values bypass .get defaults; str(None) becomes 'None'."""
+    raw = '{"classification": null, "summary": null}'
+    with patch.object(lg, "_ollama_generate", return_value=raw):
+        out = lg.classify_node({"document_text": "anything"})
+    assert out["classification"] == "None"
+    assert out["summary"] == "None"
+
+
+def test_classify_node_non_string_fields_coerce_via_str():
+    raw = '{"classification": 123, "summary": {"nested": true}}'
+    with patch.object(lg, "_ollama_generate", return_value=raw):
+        out = lg.classify_node({"document_text": "anything"})
+    assert out["classification"] == "123"
+    assert out["summary"] == "{'nested': True}"
+
+
 def test_ollama_generate_uses_mock_json_when_set(monkeypatch):
     monkeypatch.setenv("LLM_MOCK_JSON", '{"classification": "M", "summary": "S"}')
     import importlib
