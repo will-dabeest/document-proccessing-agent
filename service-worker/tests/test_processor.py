@@ -29,6 +29,21 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_pdf_joins_multiple_pages_in_order():
+    pages = []
+    for text in ("Page one", "Page two", "Page three"):
+        page = MagicMock()
+        page.extract_text.return_value = text
+        pages.append(page)
+    mock_reader = MagicMock()
+    mock_reader.pages = pages
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader):
+        out = extract_text_from_object("multi.pdf", b"%PDF-1.4 multi")
+    assert out == "Page one\nPage two\nPage three"
+    for page in pages:
+        page.extract_text.assert_called_once()
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(
@@ -119,3 +134,25 @@ def test_save_completed_overwrites_item():
     assert item["Status"] == "Completed"
     assert item["Classification"] == "Tech"
     assert item["Summary"] == "Summary text"
+
+
+@mock_aws
+def test_save_completed_overwrites_failed_status():
+    """Unconditional put_item can replace an externally marked Failed row."""
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName="ProcessLog",
+        KeySchema=[{"AttributeName": "MessageId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "MessageId", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("ProcessLog")
+    jid = "job-failed-then-complete"
+    table.put_item(
+        Item={"MessageId": jid, "Status": "Failed", "Error": "upstream boom"}
+    )
+    save_completed(table, jid, "Finance", "Stale worker finished late")
+    item = table.get_item(Key={"MessageId": jid})["Item"]
+    assert item["Status"] == "Completed"
+    assert item["Classification"] == "Finance"
+    assert item["Summary"] == "Stale worker finished late"
+    assert "Error" not in item

@@ -175,7 +175,12 @@ def _parse_json_obj(text: str) -> dict:
     m = re.search(r"\{[\s\S]*\}", text)
     if m:
         text = m.group(0)
-    return json.loads(text)
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        # Valid JSON that is not an object (null/array/scalar) must take the
+        # same repair/fallback path as malformed JSON — callers use .get().
+        raise json.JSONDecodeError("Expected JSON object", text, 0)
+    return data
 
 
 def classify_node(state: AgentState) -> AgentState:

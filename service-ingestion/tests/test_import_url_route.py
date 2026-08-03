@@ -58,11 +58,14 @@ def test_import_url_publish_failure_returns_502(mock_s3):
         "app.main.fetch_url_document", new=_fetch_text
     ), patch("app.main.publish_job_safe", side_effect=RuntimeError("sqs down")), patch(
         "app.main.index_document"
-    ):
+    ) as idx:
         client = TestClient(app)
         response = client.post("/import-url", json={"url": "https://example.com/x"})
 
     assert response.status_code == 502
+    # Stored URL bytes must not be indexed when the worker job never queued.
+    idx.assert_not_called()
+    mock_s3.upload_fileobj.assert_called_once()
 
 
 def test_import_url_propagates_url_import_error(mock_s3):
