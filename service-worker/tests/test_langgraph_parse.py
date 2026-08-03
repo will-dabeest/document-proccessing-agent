@@ -20,3 +20,9 @@ def test_parse_json_obj_embedded_in_prose():
 def test_parse_json_obj_malformed_raises():
     with pytest.raises(json.JSONDecodeError):
         lg._parse_json_obj("this is not json")
+
+
+@pytest.mark.parametrize("raw", ["[]", "null", "true", "42", '"just a string"'])
+def test_parse_json_obj_non_object_raises(raw: str):
+    with pytest.raises(json.JSONDecodeError, match="Expected JSON object"):
+        lg._parse_json_obj(raw)

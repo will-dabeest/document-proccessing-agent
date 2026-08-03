@@ -79,6 +79,38 @@ def test_classify_node_missing_keys_use_defaults():
     assert out["summary"] == ""
 
 
+def test_classify_node_non_object_json_triggers_repair():
+    """LLMs sometimes return valid JSON arrays/null instead of an object."""
+    fixed = '{"classification": "Ops", "summary": "Repaired from array."}'
+    prompts: list[str] = []
+
+    def fake_generate(prompt: str, **_kwargs: object) -> str:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return "[]"
+        return fixed
+
+    with patch.object(lg, "_ollama_generate", side_effect=fake_generate):
+        out = lg.classify_node({"document_text": "runbook", "attempts": 0})
+
+    assert out["classification"] == "Ops"
+    assert out["summary"] == "Repaired from array."
+    assert out["attempts"] == 1
+    assert len(prompts) == 2
+    assert "invalid JSON" in prompts[1]
+    assert "[]" in prompts[1]
+
+
+def test_classify_node_null_json_at_max_attempts_falls_back():
+    with patch.object(lg, "_ollama_generate", return_value="null") as gen:
+        out = lg.classify_node({"document_text": "doc", "attempts": 2})
+
+    gen.assert_called_once()
+    assert out["classification"] == "Unknown"
+    assert out["summary"] == "null"
+    assert out["attempts"] == 3
+
+
 def test_ollama_generate_uses_mock_json_when_set(monkeypatch):
     monkeypatch.setenv("LLM_MOCK_JSON", '{"classification": "M", "summary": "S"}')
     import importlib

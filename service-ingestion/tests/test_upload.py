@@ -29,13 +29,16 @@ def test_upload_publish_failure_returns_502():
     mock_s3 = MagicMock()
     with patch("app.main.get_s3_client", return_value=mock_s3), patch(
         "app.main.publish_job_safe", side_effect=RuntimeError("sqs down")
-    ), patch("app.main.index_document"):
+    ), patch("app.main.index_document") as idx:
         client = TestClient(app)
         response = client.post(
             "/upload",
             files={"file": ("test.txt", b"hello", "text/plain")},
         )
         assert response.status_code == 502
+        # Publish failure must not leave an indexed document without a queue job.
+        idx.assert_not_called()
+        mock_s3.upload_fileobj.assert_called_once()
 
 
 def test_health():
