@@ -85,6 +85,19 @@ def test_run_once_false_when_no_messages():
     sqs.delete_message.assert_not_called()
 
 
+def test_run_once_receive_message_long_poll_and_trace_attrs():
+    """Long-poll + MessageAttributeNames=All is required for traceparent propagation."""
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {}
+    assert run_once(sqs, "http://example/queue") is False
+    sqs.receive_message.assert_called_once_with(
+        QueueUrl="http://example/queue",
+        MaxNumberOfMessages=1,
+        WaitTimeSeconds=20,
+        MessageAttributeNames=["All"],
+    )
+
+
 def test_run_once_deletes_on_success():
     body = json.dumps(
         {
