@@ -108,6 +108,47 @@ def test_documents_maps_dynamo_scan_items():
     mock_resource.Table.assert_called_once()
 
 
+def test_documents_ignores_last_evaluated_key_no_pagination():
+    """GET /documents does a single Limit=100 scan and drops later pages."""
+    from app.main import app
+
+    mock_table = MagicMock()
+    mock_table.scan.return_value = {
+        "Items": [
+            {
+                "MessageId": "page1-only",
+                "Status": "Completed",
+                "Classification": "Tech",
+                "Summary": "First page",
+            },
+        ],
+        "LastEvaluatedKey": {"MessageId": "page1-only"},
+    }
+    mock_resource = MagicMock()
+    mock_resource.Table.return_value = mock_table
+
+    with patch("app.main.get_dynamodb_resource", return_value=mock_resource):
+        client = TestClient(app)
+        response = client.get("/documents")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "message_id": "page1-only",
+            "status": "Completed",
+            "classification": "Tech",
+            "summary": "First page",
+        },
+    ]
+    mock_table.scan.assert_called_once_with(Limit=100)
+    assert mock_table.scan.call_count == 1
+    # No ExclusiveStartKey follow-up — documents today's truncation contract.
+    assert all(
+        "ExclusiveStartKey" not in (c.kwargs or {})
+        for c in mock_table.scan.call_args_list
+    )
+
+
 def test_upload_s3_failure_returns_500():
     from app.main import app
 

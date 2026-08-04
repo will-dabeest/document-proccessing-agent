@@ -5,6 +5,7 @@ from moto import mock_aws
 
 from worker_app.processor import (
     extract_text_from_object,
+    notify_index,
     process_job_body,
     save_completed,
     try_claim_job,
@@ -27,6 +28,55 @@ def test_extract_text_pdf_delegates_to_pypdf():
     with patch("worker_app.processor.PdfReader", return_value=mock_reader):
         out = extract_text_from_object("report.pdf", b"%PDF-1.4 dummy")
     assert out == "Extracted PDF line"
+
+
+def test_extract_text_pdf_whitespace_only_strips_to_empty():
+    """PDF path strips; whitespace-only pages become '' and skip notify_index."""
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = "  \n  "
+    mock_reader = MagicMock()
+    mock_reader.pages = [mock_page, MagicMock(extract_text=MagicMock(return_value=None))]
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader):
+        assert extract_text_from_object("blank.pdf", b"%PDF-1.4 dummy") == ""
+
+
+def test_extract_text_utf8_preserves_whitespace_no_strip():
+    """Non-PDF decode does not strip — truthy whitespace still triggers notify."""
+    assert extract_text_from_object("notes.txt", b"  \n") == "  \n"
+
+
+def test_process_job_body_whitespace_pdf_skips_notify_index():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"%PDF"
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value=""
+    ), patch(
+        "worker_app.processor.run_agent",
+        return_value={"classification": "Unknown", "summary": "empty"},
+    ), patch(
+        "worker_app.processor.save_completed"
+    ), patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        process_job_body("job-ws-pdf", "blank.pdf", tbl)
+
+    ni.assert_not_called()
+
+
+def test_notify_index_strips_trailing_slash_on_base_url():
+    mock_post = MagicMock()
+    with patch("worker_app.processor.settings") as settings, patch(
+        "httpx.post", mock_post
+    ):
+        settings.ingestion_base_url = "http://ingestion:8000/"
+        notify_index("jid-1", "doc.txt", "hello")
+
+    mock_post.assert_called_once_with(
+        "http://ingestion:8000/internal/index",
+        json={"job_id": "jid-1", "filename": "doc.txt", "text": "hello"},
+        timeout=30.0,
+    )
 
 
 @mock_aws
