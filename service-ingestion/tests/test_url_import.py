@@ -60,8 +60,14 @@ def test_raise_for_private_blocks_cgnat_via_dns(monkeypatch):
     assert exc.value.status_code == 403
 
 
-def test_raise_for_private_blocks_decimal_cgnat_hostname():
+def test_raise_for_private_blocks_decimal_cgnat_hostname(monkeypatch):
     """Decimal IPv4 hostnames can resolve to CGNAT (e.g. 1681915905 → 100.64.0.1)."""
+
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        assert host == "1681915905"
+        return [(0, 0, 0, "", ("100.64.0.1", 0))]
+
+    monkeypatch.setattr("app.url_import.socket.getaddrinfo", fake_getaddrinfo)
     with pytest.raises(UrlImportError) as exc:
         raise_for_private_or_meta_hosts("1681915905")
     assert exc.value.status_code == 403
