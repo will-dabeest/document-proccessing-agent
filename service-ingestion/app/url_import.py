@@ -43,8 +43,26 @@ def _ip_from_sockaddr(sockaddr: object) -> str | None:
     return None
 
 
+def _ip_is_disallowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True for addresses that must not be fetched (SSRF mitigation).
+
+    ``not is_global`` covers RFC1918, loopback, link-local, unspecified, and
+    carrier-grade NAT (``100.64.0.0/10``), which ``is_private`` does not flag.
+    Multicast can still be ``is_global``; reserved catches some IPv4-mapped forms
+    where ``is_global`` is True.
+    """
+    return (
+        (not ip.is_global)
+        or ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+    )
+
+
 def raise_for_private_or_meta_hosts(hostname: str) -> None:
-    """Resolve hostname and reject loopback, private, link-local, and multicast targets (SSRF mitigation)."""
+    """Resolve hostname and reject non-global / special-use targets (SSRF mitigation)."""
     host = _punycode_hostname(hostname.strip())
     if not host:
         raise UrlImportError(400, "Missing host")
@@ -55,25 +73,13 @@ def raise_for_private_or_meta_hosts(hostname: str) -> None:
             ip = ipaddress.ip_address(inner)
         except ValueError as e:
             raise UrlImportError(400, "Invalid host") from e
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-        ):
+        if _ip_is_disallowed(ip):
             raise UrlImportError(403, "URL resolves to a disallowed address")
         return
 
     try:
         ip = ipaddress.ip_address(host)
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-        ):
+        if _ip_is_disallowed(ip):
             raise UrlImportError(403, "URL resolves to a disallowed address")
         return
     except ValueError:
@@ -84,6 +90,7 @@ def raise_for_private_or_meta_hosts(hostname: str) -> None:
     except socket.gaierror as e:
         raise UrlImportError(400, f"Could not resolve host: {e}") from e
 
+    saw_ip = False
     for info in infos:
         ip_s = _ip_from_sockaddr(info[4])
         if not ip_s:
@@ -92,14 +99,11 @@ def raise_for_private_or_meta_hosts(hostname: str) -> None:
             ip = ipaddress.ip_address(ip_s)
         except ValueError:
             continue
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-        ):
+        saw_ip = True
+        if _ip_is_disallowed(ip):
             raise UrlImportError(403, "URL resolves to a disallowed address")
+    if not saw_ip:
+        raise UrlImportError(400, "Could not resolve host to an IP address")
 
 
 def _parse_and_validate_url(url: str) -> tuple[str, str, int | None]:

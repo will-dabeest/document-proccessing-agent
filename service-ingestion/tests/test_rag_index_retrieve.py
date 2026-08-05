@@ -73,6 +73,26 @@ def test_index_document_adds_chunks_with_ids_and_metadata(fake_model, fake_colle
     assert all(len(row) == 4 for row in emb)
 
 
+def test_index_document_reindex_reuses_deterministic_ids(fake_model, fake_collection):
+    """Sync upload index then worker notify_index both call add with the same job_id ids."""
+    text = "hello world"
+    chunks = chunk_text(text)
+    job_id = "jid-reindex"
+    expected_ids = [f"{job_id}-{i}" for i in range(len(chunks))]
+
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        index_document(job_id, "a.txt", text)
+        index_document(job_id, "a.txt", text)
+
+    assert fake_collection.add.call_count == 2
+    first_ids = fake_collection.add.call_args_list[0].kwargs["ids"]
+    second_ids = fake_collection.add.call_args_list[1].kwargs["ids"]
+    assert first_ids == expected_ids
+    assert second_ids == expected_ids
+
+
 def test_retrieve_context_passes_n_results_to_query(fake_model, fake_collection):
     with patch("app.rag_service._get_model", return_value=fake_model), patch(
         "app.rag_service._get_collection", return_value=fake_collection

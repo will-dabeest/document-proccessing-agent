@@ -104,6 +104,30 @@ def test_run_once_deletes_on_success():
     )
 
 
+def test_run_once_deletes_when_duplicate_done():
+    """Completed jobs return normally from handle_message and must be acked (architecture contract)."""
+    body = json.dumps(
+        {
+            "s3_key": "a.txt",
+            "idempotency_key": "id-done",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [{"ReceiptHandle": "rh-done", "Body": body}],
+    }
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="duplicate_done"
+    ), patch("worker_app.worker.process_job_body") as proc:
+        gr.return_value.Table.return_value = MagicMock()
+        assert run_once(sqs, "http://q") is True
+    proc.assert_not_called()
+    sqs.delete_message.assert_called_once_with(
+        QueueUrl="http://q", ReceiptHandle="rh-done"
+    )
+
+
 def test_run_once_no_delete_when_handle_message_raises():
     body = json.dumps(
         {
