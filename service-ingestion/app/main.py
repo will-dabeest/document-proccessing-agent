@@ -72,10 +72,24 @@ async def health():
     return {"status": "ok"}
 
 
+def _safe_upload_basename(filename: str | None) -> str:
+    """Reduce path-like upload names to a single S3 object basename.
+
+    Path.name only strips POSIX separators; normalize backslashes first so
+    Windows-style traversal (``..\\\\secret.txt``) cannot bypass sanitization
+    on Linux hosts. Empty / ``.`` / ``..`` basenames fall back to ``upload``.
+    """
+    raw = (filename or "upload").replace("\\", "/")
+    name = Path(raw).name
+    if not name or name in {".", ".."}:
+        return "upload"
+    return name
+
+
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     s3 = get_s3_client()
-    safe_name = Path(file.filename or "upload").name
+    safe_name = _safe_upload_basename(file.filename)
     body = await file.read()
     buf = BytesIO(body)
     s3.upload_fileobj(buf, settings.bucket_name, safe_name)
@@ -138,7 +152,10 @@ class AskRequest(BaseModel):
 
 @app.post("/ask")
 async def ask(req: AskRequest):
-    return answer_question(req.question, llm_call=generate_llama3)
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required")
+    return answer_question(question, llm_call=generate_llama3)
 
 
 @app.get("/documents")

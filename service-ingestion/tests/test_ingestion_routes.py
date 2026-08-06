@@ -28,7 +28,50 @@ def test_ask_returns_answer_question_payload():
     assert response.status_code == 200
     assert response.json() == payload
     aq.assert_called_once()
+    assert aq.call_args.args[0] == "What?"
     assert aq.call_args.kwargs["llm_call"] is generate_llama3
+
+
+def test_ask_rejects_blank_and_whitespace_questions():
+    """Blank /ask must not embed or call the LLM (wasted cost / empty RAG noise)."""
+    from app.main import app
+
+    with patch("app.main.answer_question") as aq:
+        client = TestClient(app)
+        for question in ("", "   ", "\n\t  "):
+            response = client.post("/ask", json={"question": question})
+            assert response.status_code == 400, question
+            assert response.json()["detail"] == "Question is required"
+    aq.assert_not_called()
+
+
+def test_ask_strips_surrounding_whitespace_before_answer_question():
+    from app.main import app
+
+    payload = {"answer": "ok", "snippets": []}
+    with patch("app.main.answer_question", return_value=payload) as aq:
+        client = TestClient(app)
+        response = client.post("/ask", json={"question": "  What is X?  \n"})
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    aq.assert_called_once()
+    assert aq.call_args.args[0] == "What is X?"
+
+
+def test_cors_disallowed_origin_omits_allow_origin_header():
+    """Only Vite dev origins are allowlisted; others must not receive ACAO."""
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.get(
+        "/health",
+        headers={"Origin": "https://evil.example"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    headers_lower = {k.lower(): v for k, v in response.headers.items()}
+    assert "access-control-allow-origin" not in headers_lower
 
 
 def test_ask_endpoint_wires_ollama_and_retrieve_context():
