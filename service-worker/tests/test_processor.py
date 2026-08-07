@@ -58,6 +58,28 @@ def test_try_claim_job_duplicate_done_after_completed():
 
 
 @mock_aws
+def test_try_claim_job_status_comparison_is_case_sensitive():
+    """Only exact Status=='Completed' is treated as done.
+
+    Lower/upper variants remain duplicate_inflight so run_once never acks,
+    which can poison the queue via visibility-timeout retries.
+    """
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName="ProcessLog",
+        KeySchema=[{"AttributeName": "MessageId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "MessageId", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("ProcessLog")
+    for jid, status in (
+        ("job-case-lower", "completed"),
+        ("job-case-upper", "COMPLETED"),
+    ):
+        table.put_item(Item={"MessageId": jid, "Status": status})
+        assert try_claim_job(table, jid) == "duplicate_inflight"
+
+
+@mock_aws
 def test_process_job_body_invokes_run_agent_save_and_notify():
     tbl = MagicMock()
     with patch(

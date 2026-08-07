@@ -30,3 +30,15 @@ def test_to_json_dict_has_publisher_fields():
     assert d["s3_key"] == "doc.txt"
     assert d["idempotency_key"] == "id-1"
     assert d["uploaded_at"] == "2024-06-01T12:00:00+00:00"
+
+
+def test_job_message_accepts_empty_s3_key():
+    """Current shared contract allows empty s3_key (no min_length).
+
+    Empty keys can still enqueue; the worker then fails after claim when
+    downloading, which is a high-blast-radius validation boundary.
+    """
+    j = JobMessage(s3_key="", idempotency_key="empty-key", uploaded_at="2024-01-01T00:00:00+00:00")
+    assert j.s3_key == ""
+    parsed = parse_job_message(j.model_dump_json())
+    assert parsed.s3_key == ""

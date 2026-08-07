@@ -19,6 +19,20 @@ def test_extract_trace_from_message_with_traceparent():
     assert ctx is not None
 
 
+def test_extract_trace_from_message_ignores_tracestate_attribute():
+    """Worker extract only reads traceparent; tracestate alone does not propagate."""
+    from opentelemetry import context as otel_context
+
+    current = otel_context.get_current()
+    msg = {
+        "MessageAttributes": {
+            "tracestate": {"StringValue": "vendor=alpha,other=1"},
+        }
+    }
+    ctx = extract_trace_from_message(msg)
+    assert ctx is current
+
+
 def test_handle_message_duplicate_done_skips_process():
     body = json.dumps(
         {
