@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -15,6 +16,44 @@ def test_internal_index_calls_index_document():
     assert response.status_code == 200
     assert response.json() == {"status": "indexed"}
     idx.assert_called_once_with("j1", "f.txt", "hello")
+
+
+@pytest.mark.parametrize("text", ["", "  \n\t  "])
+def test_internal_index_blank_text_still_reports_indexed_without_chroma_write(text):
+    """Route always returns indexed; empty/whitespace text must not touch embeddings/Chroma."""
+    from app.main import app
+
+    with patch("app.rag_service._get_model") as gm, patch(
+        "app.rag_service._get_collection"
+    ) as gc:
+        client = TestClient(app)
+        response = client.post(
+            "/internal/index",
+            json={"job_id": "j-blank", "filename": "empty.txt", "text": text},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "indexed"}
+    gm.assert_not_called()
+    gc.assert_not_called()
+
+
+def test_internal_index_accepts_unauthenticated_requests():
+    """Documents current open contract: /internal/index has no auth dependency."""
+    from app.main import app
+
+    with patch("app.main.index_document") as idx:
+        client = TestClient(app)
+        response = client.post(
+            "/internal/index",
+            json={"job_id": "j-open", "filename": "f.txt", "text": "body"},
+            headers={},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "indexed"}
+    idx.assert_called_once_with("j-open", "f.txt", "body")
+    assert "authorization" not in {k.lower() for k in response.request.headers}
 
 
 def test_ask_returns_answer_question_payload():

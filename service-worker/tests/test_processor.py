@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -100,6 +101,28 @@ def test_process_job_body_empty_extract_skips_notify_index():
         process_job_body("job-y", "empty.bin", tbl)
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
+    ni.assert_not_called()
+
+
+def test_process_job_body_save_completed_failure_skips_notify_index():
+    """Durable status write must succeed before index notify; otherwise RAG can diverge."""
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"bytes"
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value="extracted"
+    ), patch(
+        "worker_app.processor.run_agent",
+        return_value={"classification": "Tech", "summary": "Done"},
+    ), patch(
+        "worker_app.processor.save_completed",
+        side_effect=RuntimeError("dynamo unavailable"),
+    ), patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        with pytest.raises(RuntimeError, match="dynamo unavailable"):
+            process_job_body("job-save-fail", "file.txt", tbl)
+
     ni.assert_not_called()
 
 
