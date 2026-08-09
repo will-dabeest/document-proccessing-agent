@@ -103,3 +103,26 @@ def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection
         "metadatas",
         "distances",
     ]
+
+
+@pytest.mark.parametrize(
+    "query_result",
+    [
+        {"documents": None, "metadatas": None, "distances": None},
+        {"documents": [], "metadatas": [], "distances": []},
+    ],
+)
+def test_retrieve_context_coerces_null_or_flat_empty_chroma_fields(
+    fake_model, fake_collection, query_result
+):
+    """Chroma may return null or flat empty lists; without or [[]], /ask TypeErrors."""
+    fake_collection.query.return_value = query_result
+
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        docs, metas, dists = retrieve_context("Anything?")
+
+    assert docs == []
+    assert metas == []
+    assert dists == []
