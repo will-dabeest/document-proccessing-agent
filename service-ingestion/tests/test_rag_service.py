@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from app.rag_service import answer_question
 
 
@@ -8,6 +10,16 @@ def test_answer_question_no_context_returns_fixed_message():
         out = answer_question("What is X?", llm_call=lambda p: "should not run")
     assert out["answer"] == "No relevant information found in uploaded documents."
     assert out["snippets"] == []
+
+
+def test_answer_question_retrieve_failure_propagates():
+    """Unlike empty retrieval, Chroma/embed failures are not softened to a fixed answer."""
+    with patch(
+        "app.rag_service.retrieve_context",
+        side_effect=RuntimeError("chroma down"),
+    ):
+        with pytest.raises(RuntimeError, match="chroma down"):
+            answer_question("What is X?", llm_call=lambda p: "should not run")
 
 
 def test_answer_question_calls_llm_and_returns_snippets():

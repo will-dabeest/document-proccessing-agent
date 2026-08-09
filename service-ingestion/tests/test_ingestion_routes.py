@@ -74,6 +74,20 @@ def test_ask_endpoint_ollama_failure_returns_fallback_answer():
     )
 
 
+def test_ask_endpoint_retrieve_failure_returns_500():
+    """Index/embed failures surface as 500; they are not the soft empty-RAG path."""
+    from app.main import app
+
+    with patch(
+        "app.rag_service.retrieve_context",
+        side_effect=RuntimeError("chroma down"),
+    ):
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/ask", json={"question": "Q?"})
+
+    assert response.status_code == 500
+
+
 def test_documents_maps_dynamo_scan_items():
     from app.main import app
 
@@ -106,6 +120,24 @@ def test_documents_maps_dynamo_scan_items():
         },
     ]
     mock_resource.Table.assert_called_once()
+
+
+def test_documents_omitted_items_key_returns_empty_list():
+    """Dynamo scan may omit Items entirely; resp.get('Items', []) must not KeyError."""
+    from app.main import app
+
+    mock_table = MagicMock()
+    mock_table.scan.return_value = {}
+    mock_resource = MagicMock()
+    mock_resource.Table.return_value = mock_table
+
+    with patch("app.main.get_dynamodb_resource", return_value=mock_resource):
+        client = TestClient(app)
+        response = client.get("/documents")
+
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+    mock_table.scan.assert_called_once_with(Limit=100)
 
 
 def test_upload_s3_failure_returns_500():

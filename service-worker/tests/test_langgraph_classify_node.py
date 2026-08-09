@@ -1,7 +1,7 @@
 """Unit tests for classify_node and _ollama_generate edge cases (mocked LLM)."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -79,6 +79,25 @@ def test_classify_node_missing_keys_use_defaults():
     assert out["summary"] == ""
 
 
+@pytest.mark.parametrize("state", [{}, {"document_text": ""}, {"document_text": None}])
+def test_classify_node_missing_or_empty_document_text_still_calls_llm(state):
+    """Empty extract/missing state still spends an LLM call with an empty Document section."""
+    prompts: list[str] = []
+
+    def fake_generate(prompt: str, **_kwargs: object) -> str:
+        prompts.append(prompt)
+        return '{"classification": "Unknown", "summary": "No content."}'
+
+    with patch.object(lg, "_ollama_generate", side_effect=fake_generate):
+        out = lg.classify_node(state)
+
+    assert len(prompts) == 1
+    # Prompt template keeps a blank Document section when text is missing/empty.
+    assert "Document:\n\n" in prompts[0]
+    assert out["classification"] == "Unknown"
+    assert out["summary"] == "No content."
+
+
 def test_ollama_generate_uses_mock_json_when_set(monkeypatch):
     monkeypatch.setenv("LLM_MOCK_JSON", '{"classification": "M", "summary": "S"}')
     import importlib
@@ -112,6 +131,29 @@ def test_ollama_generate_http_failure_returns_fallback_json():
     data = lg._parse_json_obj(out)
     assert data["classification"] == "Unknown"
     assert "unavailable" in data["summary"].lower()
+
+
+def test_ollama_generate_json_array_body_uses_exception_fallback():
+    """A 200 with a JSON array is not a dict; .get on the list raises → exception path."""
+    fake_settings = SimpleNamespace(
+        llm_mock_json=None,
+        ollama_base_url="http://127.0.0.1:9",
+        ollama_model="llama3",
+        ollama_http_timeout_seconds=30.0,
+    )
+    mock_response = MagicMock(status_code=200)
+    mock_response.json.return_value = [1, 2]
+    mock_response.raise_for_status = MagicMock()
+
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", return_value=mock_response
+    ), patch.object(lg, "log_llm_event") as log_event:
+        out = lg._ollama_generate("prompt")
+
+    data = lg._parse_json_obj(out)
+    assert data["classification"] == "Unknown"
+    assert "unavailable" in data["summary"].lower()
+    assert log_event.call_args.kwargs["outcome"] == "exception"
 
 
 def test_classify_node_after_ollama_http_failure_parses_fallback():

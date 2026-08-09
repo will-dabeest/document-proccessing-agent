@@ -29,6 +29,15 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_pdf_zero_pages_returns_empty():
+    """A PDF with no pages yields empty text; process_job_body then skips notify_index."""
+    mock_reader = MagicMock()
+    mock_reader.pages = []
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader):
+        out = extract_text_from_object("empty.pdf", b"%PDF-1.4 empty")
+    assert out == ""
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(

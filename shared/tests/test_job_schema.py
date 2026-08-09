@@ -30,3 +30,19 @@ def test_to_json_dict_has_publisher_fields():
     assert d["s3_key"] == "doc.txt"
     assert d["idempotency_key"] == "id-1"
     assert d["uploaded_at"] == "2024-06-01T12:00:00+00:00"
+
+
+def test_job_message_accepts_empty_idempotency_key():
+    """Current shared contract allows empty idempotency_key (no min_length).
+
+    The worker claims Dynamo with MessageId=idempotency_key, so concurrent
+    empty-key jobs collide on the same claim row.
+    """
+    j = JobMessage(
+        s3_key="a.txt",
+        idempotency_key="",
+        uploaded_at="2024-01-01T00:00:00+00:00",
+    )
+    assert j.idempotency_key == ""
+    parsed = parse_job_message(j.model_dump_json())
+    assert parsed.idempotency_key == ""
