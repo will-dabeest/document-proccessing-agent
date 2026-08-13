@@ -108,6 +108,34 @@ def test_documents_maps_dynamo_scan_items():
     mock_resource.Table.assert_called_once()
 
 
+def test_documents_partial_items_map_missing_fields_to_none():
+    """In-flight Dynamo rows often have only MessageId+Status; API must not KeyError."""
+    from app.main import app
+
+    mock_table = MagicMock()
+    mock_table.scan.return_value = {
+        "Items": [
+            {"MessageId": "m-processing", "Status": "Processing"},
+        ],
+    }
+    mock_resource = MagicMock()
+    mock_resource.Table.return_value = mock_table
+
+    with patch("app.main.get_dynamodb_resource", return_value=mock_resource):
+        client = TestClient(app)
+        response = client.get("/documents")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "message_id": "m-processing",
+            "status": "Processing",
+            "classification": None,
+            "summary": None,
+        },
+    ]
+
+
 def test_upload_s3_failure_returns_500():
     from app.main import app
 

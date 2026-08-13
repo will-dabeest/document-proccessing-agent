@@ -103,3 +103,18 @@ def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection
         "metadatas",
         "distances",
     ]
+
+
+def test_retrieve_context_omitted_distances_returns_empty_list(fake_model, fake_collection):
+    fake_collection.query.return_value = {
+        "documents": [["chunk-a"]],
+        "metadatas": [[{"file": "f.txt"}]],
+    }
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        docs, metas, dists = retrieve_context("Q?")
+
+    assert docs == ["chunk-a"]
+    assert metas == [{"file": "f.txt"}]
+    assert dists == []
