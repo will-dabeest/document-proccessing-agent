@@ -48,3 +48,16 @@ def test_generate_llama3_on_exception_returns_unavailable_message():
     assert out == (
         "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
     )
+
+
+def test_generate_llama3_json_array_body_returns_unavailable_message():
+    """HTTP 200 with a JSON list is not a dict; data.get raises → exception fallback."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [{"response": "should not be read"}]
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.ollama_client.httpx.post", return_value=mock_resp):
+        out = generate_llama3("p")
+
+    assert out == (
+        "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
+    )

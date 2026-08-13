@@ -30,3 +30,18 @@ def test_to_json_dict_has_publisher_fields():
     assert d["s3_key"] == "doc.txt"
     assert d["idempotency_key"] == "id-1"
     assert d["uploaded_at"] == "2024-06-01T12:00:00+00:00"
+
+
+def test_parse_job_message_ignores_unknown_fields():
+    payload = json.dumps(
+        {
+            "s3_key": "a.txt",
+            "idempotency_key": "k1",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+            "unexpected": "drop-me",
+        }
+    )
+    job = parse_job_message(payload)
+    assert job.s3_key == "a.txt"
+    assert job.idempotency_key == "k1"
+    assert "unexpected" not in job.to_json_dict()

@@ -19,6 +19,15 @@ def test_extract_trace_from_message_with_traceparent():
     assert ctx is not None
 
 
+def test_extract_trace_from_message_non_dict_traceparent_uses_current_context():
+    sentinel = object()
+    msg = {"MessageAttributes": {"traceparent": "00-not-a-dict-attr-01"}}
+    with patch("worker_app.tracing.otel_context.get_current", return_value=sentinel) as current:
+        ctx = extract_trace_from_message(msg)
+    assert ctx is sentinel
+    current.assert_called_once()
+
+
 def test_handle_message_duplicate_done_skips_process():
     body = json.dumps(
         {
