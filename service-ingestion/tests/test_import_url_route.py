@@ -82,6 +82,19 @@ def test_import_url_propagates_url_import_error(mock_s3):
     assert response.json()["detail"] == "Unsupported content type"
 
 
+def test_import_url_missing_url_field_returns_422(mock_s3):
+    from app.main import app
+
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document"
+    ) as fetch, patch("app.main.publish_job_safe"), patch("app.main.index_document"):
+        client = TestClient(app)
+        response = client.post("/import-url", json={})
+
+    assert response.status_code == 422
+    fetch.assert_not_called()
+
+
 def test_import_url_disabled_returns_403(mock_s3):
     from app import config
     from app.main import app

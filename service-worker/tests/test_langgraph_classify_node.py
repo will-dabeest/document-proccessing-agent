@@ -24,6 +24,28 @@ def test_classify_node_valid_json_preserves_prior_attempts():
     assert out["attempts"] == 5
 
 
+def test_classify_node_concatenated_json_objects_enter_repair():
+    """Two adjacent JSON objects look valid but fail parse; repair must still run."""
+    concatenated = '{"classification":"A","summary":"B"}{"classification":"C","summary":"D"}'
+    fixed = '{"classification": "Tech", "summary": "Repaired summary."}'
+    prompts: list[str] = []
+
+    def fake_generate(prompt: str, **_kwargs: object) -> str:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return concatenated
+        return fixed
+
+    with patch.object(lg, "_ollama_generate", side_effect=fake_generate):
+        out = lg.classify_node({"document_text": "hello", "attempts": 0})
+
+    assert out["classification"] == "Tech"
+    assert out["summary"] == "Repaired summary."
+    assert out["attempts"] == 1
+    assert len(prompts) == 2
+    assert concatenated in prompts[1]
+
+
 def test_classify_node_invalid_json_then_valid_json():
     fixed = '{"classification": "Tech", "summary": "Fixed summary."}'
     prompts: list[str] = []
