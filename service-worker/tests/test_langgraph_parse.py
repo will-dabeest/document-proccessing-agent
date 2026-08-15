@@ -20,3 +20,10 @@ def test_parse_json_obj_embedded_in_prose():
 def test_parse_json_obj_malformed_raises():
     with pytest.raises(json.JSONDecodeError):
         lg._parse_json_obj("this is not json")
+
+
+def test_parse_json_obj_two_objects_is_invalid():
+    """Greedy brace match spans both objects, so json.loads fails instead of taking the first."""
+    raw = '{"classification":"A","summary":"B"}{"classification":"C","summary":"D"}'
+    with pytest.raises(json.JSONDecodeError):
+        lg._parse_json_obj(raw)
