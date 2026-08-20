@@ -119,3 +119,27 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+def test_handle_message_whitespace_body_raises_without_claiming():
+    """Whitespace Body is truthy, so it is not replaced with '{}'; parse must fail closed."""
+    from pydantic import ValidationError
+
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job"
+    ) as tj, patch("worker_app.worker.process_job_body") as proc:
+        with pytest.raises(ValidationError):
+            handle_message({"Body": "   "})
+
+    gr.assert_not_called()
+    tj.assert_not_called()
+    proc.assert_not_called()
+
+
+def test_run_once_whitespace_body_does_not_delete():
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [{"ReceiptHandle": "rh-ws", "Body": "   "}],
+    }
+    assert run_once(sqs, "http://q") is True
+    sqs.delete_message.assert_not_called()
