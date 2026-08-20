@@ -124,3 +124,16 @@ def test_upload_s3_failure_returns_500():
         )
 
     assert response.status_code == 500
+
+
+def test_cors_allows_loopback_vite_origin():
+    """Middleware allow-list includes 127.0.0.1:5173 as well as localhost."""
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.get(
+        "/health",
+        headers={"Origin": "http://127.0.0.1:5173"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
