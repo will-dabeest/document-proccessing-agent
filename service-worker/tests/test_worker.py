@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
@@ -83,6 +84,34 @@ def test_run_once_false_when_no_messages():
     sqs.receive_message.return_value = {}
     assert run_once(sqs, "http://example/queue") is False
     sqs.delete_message.assert_not_called()
+
+
+def test_run_once_false_when_messages_empty_list():
+    """SQS may omit Messages or return []; neither is a processable batch."""
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {"Messages": []}
+    assert run_once(sqs, "http://example/queue") is False
+    sqs.delete_message.assert_not_called()
+
+
+def test_handle_message_missing_s3_key_does_not_claim():
+    msg = {
+        "Body": json.dumps(
+            {
+                "idempotency_key": "jid-missing-key",
+                "uploaded_at": "2024-01-01T00:00:00+00:00",
+            }
+        )
+    }
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job"
+    ) as tj, patch("worker_app.worker.process_job_body") as proc:
+        with pytest.raises(ValidationError):
+            handle_message(msg)
+
+    gr.assert_not_called()
+    tj.assert_not_called()
+    proc.assert_not_called()
 
 
 def test_run_once_deletes_on_success():
