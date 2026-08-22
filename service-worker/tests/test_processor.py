@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -119,3 +120,21 @@ def test_save_completed_overwrites_item():
     assert item["Status"] == "Completed"
     assert item["Classification"] == "Tech"
     assert item["Summary"] == "Summary text"
+
+
+def test_try_claim_job_missing_item_after_condition_fail_is_duplicate_inflight():
+    """If the row disappears between the failed put and get_item, do not treat it as Completed."""
+    table = MagicMock()
+    table.put_item.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ConditionalCheckFailedException",
+                "Message": "The conditional request failed",
+            }
+        },
+        "PutItem",
+    )
+    table.get_item.return_value = {}
+
+    assert try_claim_job(table, "job-gone") == "duplicate_inflight"
+    table.get_item.assert_called_once_with(Key={"MessageId": "job-gone"})
