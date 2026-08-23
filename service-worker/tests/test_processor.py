@@ -5,6 +5,7 @@ from moto import mock_aws
 
 from worker_app.processor import (
     extract_text_from_object,
+    notify_index,
     process_job_body,
     save_completed,
     try_claim_job,
@@ -119,3 +120,10 @@ def test_save_completed_overwrites_item():
     assert item["Status"] == "Completed"
     assert item["Classification"] == "Tech"
     assert item["Summary"] == "Summary text"
+
+
+def test_notify_index_uses_thirty_second_http_timeout():
+    with patch("httpx.post") as post:
+        notify_index("job-timeout", "notes.txt", "indexed text")
+    assert post.call_args.kwargs["timeout"] == 30.0
+    assert post.call_args.args[0].endswith("/internal/index")
