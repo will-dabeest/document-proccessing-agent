@@ -30,3 +30,10 @@ def test_chunk_text_multiple_chunks_with_overlap():
 def test_chunk_text_exact_chunk_boundary():
     text = "0123456789"  # 10 chars
     assert chunk_text(text, chunk_size=10, overlap=2) == ["0123456789"]
+
+
+def test_chunk_text_default_size_and_overlap_used_by_rag():
+    text = "x" * 850
+    chunks = chunk_text(text)
+    assert len(chunks[0]) == 800
+    assert chunks[1] == text[700:850]

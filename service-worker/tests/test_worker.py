@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from worker_app.tracing import extract_trace_from_message
-from worker_app.worker import handle_message, run_once
+from worker_app.worker import handle_message, main, run_once
 
 
 def test_extract_trace_from_message_without_traceparent():
@@ -119,3 +119,74 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+def test_extract_trace_from_message_null_attributes_uses_current_context():
+    ctx = extract_trace_from_message({"MessageAttributes": None})
+    assert ctx is not None
+
+
+def test_run_once_false_when_messages_is_none():
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {"Messages": None}
+    assert run_once(sqs, "http://example/queue") is False
+    sqs.delete_message.assert_not_called()
+
+
+def test_run_once_missing_receipt_handle_raises_before_processing():
+    body = json.dumps(
+        {
+            "s3_key": "a.txt",
+            "idempotency_key": "id-no-rh",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {"Messages": [{"Body": body}]}
+    with patch("worker_app.worker.handle_message") as handle:
+        with pytest.raises(KeyError):
+            run_once(sqs, "http://q")
+    handle.assert_not_called()
+    sqs.delete_message.assert_not_called()
+
+
+def test_run_once_delete_failure_after_success_is_swallowed():
+    body = json.dumps(
+        {
+            "s3_key": "a.txt",
+            "idempotency_key": "id-del",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [{"ReceiptHandle": "rh-3", "Body": body}],
+    }
+    sqs.delete_message.side_effect = RuntimeError("sqs delete denied")
+    with patch("worker_app.worker.handle_message") as handle:
+        assert run_once(sqs, "http://q") is True
+    handle.assert_called_once()
+    sqs.delete_message.assert_called_once_with(
+        QueueUrl="http://q", ReceiptHandle="rh-3"
+    )
+
+
+def test_main_stops_on_keyboard_interrupt_without_sleeping():
+    with patch("worker_app.worker._configure_tracing"), patch(
+        "worker_app.worker.get_sqs_client", return_value=MagicMock()
+    ), patch("worker_app.worker.run_once", side_effect=KeyboardInterrupt), patch(
+        "worker_app.worker.time.sleep"
+    ) as slept:
+        main()
+    slept.assert_not_called()
+
+
+def test_main_sleeps_then_continues_after_loop_error():
+    with patch("worker_app.worker._configure_tracing"), patch(
+        "worker_app.worker.get_sqs_client", return_value=MagicMock()
+    ), patch(
+        "worker_app.worker.run_once",
+        side_effect=[RuntimeError("aws down"), KeyboardInterrupt],
+    ), patch("worker_app.worker.time.sleep") as slept:
+        main()
+    slept.assert_called_once_with(2)
