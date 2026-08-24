@@ -1,10 +1,12 @@
 """Tests for index_document and retrieve_context with mocked model and Chroma."""
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
+import app.rag_service as rag
 from app.chunking import chunk_text
 from app.rag_service import index_document, retrieve_context
 
@@ -103,3 +105,45 @@ def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection
         "metadatas",
         "distances",
     ]
+
+
+def test_get_model_loads_configured_embedding_name_once(monkeypatch):
+    old_model = rag._model
+    rag._model = None
+    fake_mod = MagicMock()
+    instance = MagicMock(name="st-instance")
+    fake_mod.SentenceTransformer.return_value = instance
+    monkeypatch.setattr(rag.settings, "embedding_model_name", "unit-test-embed")
+    try:
+        with patch.dict(sys.modules, {"sentence_transformers": fake_mod}):
+            first = rag._get_model()
+            second = rag._get_model()
+        fake_mod.SentenceTransformer.assert_called_once_with("unit-test-embed")
+        assert first is instance
+        assert second is instance
+    finally:
+        rag._model = old_model
+
+
+def test_get_collection_uses_persist_dir_and_documents_name(tmp_path, monkeypatch):
+    old_client = rag._chroma_client
+    rag._chroma_client = None
+    persist = tmp_path / "chroma-data"
+    monkeypatch.setattr(rag.settings, "chroma_persist_dir", str(persist))
+    fake_chroma = MagicMock()
+    fake_client = MagicMock()
+    fake_collection = MagicMock()
+    fake_chroma.PersistentClient.return_value = fake_client
+    fake_client.get_or_create_collection.return_value = fake_collection
+    try:
+        with patch.dict(sys.modules, {"chromadb": fake_chroma}):
+            first = rag._get_collection()
+            second = rag._get_collection()
+        assert persist.is_dir()
+        fake_chroma.PersistentClient.assert_called_once_with(path=str(persist))
+        assert fake_client.get_or_create_collection.call_count == 2
+        fake_client.get_or_create_collection.assert_called_with("documents")
+        assert first is fake_collection
+        assert second is fake_collection
+    finally:
+        rag._chroma_client = old_client

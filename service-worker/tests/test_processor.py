@@ -94,13 +94,14 @@ def test_process_job_body_empty_extract_skips_notify_index():
         return_value={"classification": "Unknown", "summary": "empty"},
     ) as ra, patch(
         "worker_app.processor.save_completed"
-    ), patch(
+    ) as sc, patch(
         "worker_app.processor.notify_index"
     ) as ni:
         process_job_body("job-y", "empty.bin", tbl)
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
     ni.assert_not_called()
+    sc.assert_called_once_with(tbl, "job-y", "Unknown", "empty")
 
 
 @mock_aws

@@ -18,6 +18,29 @@ def test_generate_llama3_success_returns_stripped_response():
     assert call_kw["json"]["stream"] is False
 
 
+def test_generate_llama3_posts_to_configured_generate_url():
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"response": "ok"}
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.status_code = 200
+    fake_settings = MagicMock()
+    fake_settings.ollama_base_url = "http://llm:11434"
+    fake_settings.ollama_model = "custom-model"
+    fake_settings.ollama_http_timeout_seconds = 9.0
+
+    with patch("app.ollama_client.httpx.post", return_value=mock_resp) as post, patch(
+        "app.ollama_client.settings", fake_settings
+    ):
+        out = generate_llama3("prompt-x")
+
+    assert out == "ok"
+    post.assert_called_once_with(
+        "http://llm:11434/api/generate",
+        json={"model": "custom-model", "prompt": "prompt-x", "stream": False},
+        timeout=9.0,
+    )
+
+
 def test_generate_llama3_empty_response_uses_fallback_string():
     mock_resp = MagicMock()
     mock_resp.json.return_value = {"response": "   "}
