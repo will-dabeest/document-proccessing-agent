@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,6 +36,55 @@ def test_import_url_success(mock_s3):
     pub.assert_called_once()
     idx.assert_called_once()
     mock_s3.upload_fileobj.assert_called_once()
+
+
+def test_import_url_storage_key_ignores_url_path_and_is_unique(mock_s3):
+    """S3 keys are imports/<uuid>.ext so URL path / Content-Disposition cannot collide or traverse."""
+    from app.main import app
+
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document", new=_fetch_text
+    ), patch("app.main.publish_job_safe") as pub, patch("app.main.index_document") as idx:
+        client = TestClient(app)
+        first = client.post(
+            "/import-url",
+            json={"url": "https://evil.example/../../etc/passwd.exe?x=1"},
+        )
+        second = client.post(
+            "/import-url",
+            json={"url": "https://evil.example/../../etc/passwd.exe?x=1"},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    key1 = first.json()["file"]
+    key2 = second.json()["file"]
+    assert key1 != key2
+    for key, job_id in (
+        (key1, first.json()["job_id"]),
+        (key2, second.json()["job_id"]),
+    ):
+        assert key.startswith("imports/")
+        assert key.endswith(".txt")
+        UUID(key[len("imports/") : -len(".txt")])
+        assert "passwd" not in key
+        assert "etc" not in key
+        assert ".." not in key
+        assert job_id not in key
+
+    assert mock_s3.upload_fileobj.call_count == 2
+    stored_keys = [c.args[2] for c in mock_s3.upload_fileobj.call_args_list]
+    assert stored_keys == [key1, key2]
+
+    assert pub.call_count == 2
+    assert pub.call_args_list[0].args[0].s3_key == key1
+    assert pub.call_args_list[0].kwargs == {"filename": key1}
+    assert pub.call_args_list[1].args[0].s3_key == key2
+    assert pub.call_args_list[1].kwargs == {"filename": key2}
+
+    assert idx.call_count == 2
+    idx.assert_any_call(first.json()["job_id"], key1, "hello from url")
+    idx.assert_any_call(second.json()["job_id"], key2, "hello from url")
 
 
 def test_import_url_pdf_skips_sync_index(mock_s3):

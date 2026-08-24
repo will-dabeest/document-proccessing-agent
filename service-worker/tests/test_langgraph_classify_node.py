@@ -1,7 +1,7 @@
 """Unit tests for classify_node and _ollama_generate edge cases (mocked LLM)."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -127,3 +127,32 @@ def test_classify_node_after_ollama_http_failure_parses_fallback():
 
     assert out["classification"] == "Unknown"
     assert "unavailable" in (out.get("summary") or "").lower()
+
+
+def test_ollama_generate_posts_to_configured_generate_url():
+    fake_settings = SimpleNamespace(
+        llm_mock_json=None,
+        ollama_base_url="http://ollama.internal:11434",
+        ollama_model="llama3:instruct",
+        ollama_http_timeout_seconds=12.5,
+    )
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"response": '{"classification":"X","summary":"Y"}'}
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.status_code = 200
+
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", return_value=mock_resp
+    ) as post:
+        out = lg._ollama_generate("prompt-body")
+
+    post.assert_called_once_with(
+        "http://ollama.internal:11434/api/generate",
+        json={
+            "model": "llama3:instruct",
+            "prompt": "prompt-body",
+            "stream": False,
+        },
+        timeout=12.5,
+    )
+    assert out == '{"classification":"X","summary":"Y"}'
