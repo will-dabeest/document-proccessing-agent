@@ -79,8 +79,6 @@ def test_handle_message_claimed_runs_process():
 
 
 def test_handle_message_uses_configured_dynamodb_table(monkeypatch):
-    from worker_app.config import settings
-
     body = json.dumps(
         {
             "s3_key": "g.txt",
@@ -89,11 +87,13 @@ def test_handle_message_uses_configured_dynamodb_table(monkeypatch):
         }
     )
     msg = {"Body": body}
-    monkeypatch.setattr(settings, "dynamodb_table", "WorkerCustomLog")
 
-    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+    with patch("worker_app.worker.settings") as fake_settings, patch(
+        "worker_app.worker.get_dynamodb_resource"
+    ) as gr, patch(
         "worker_app.worker.try_claim_job", return_value="claimed"
     ) as tj, patch("worker_app.worker.process_job_body"):
+        fake_settings.dynamodb_table = "WorkerCustomLog"
         gr.return_value.Table.return_value = MagicMock()
         handle_message(msg)
 
