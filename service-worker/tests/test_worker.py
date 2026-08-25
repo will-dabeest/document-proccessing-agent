@@ -78,6 +78,29 @@ def test_handle_message_claimed_runs_process():
     proc.assert_called_once_with("jid-3", "g.txt", tbl)
 
 
+def test_handle_message_uses_configured_dynamodb_table(monkeypatch):
+    body = json.dumps(
+        {
+            "s3_key": "g.txt",
+            "idempotency_key": "jid-table",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    msg = {"Body": body}
+
+    with patch("worker_app.worker.settings") as fake_settings, patch(
+        "worker_app.worker.get_dynamodb_resource"
+    ) as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="claimed"
+    ) as tj, patch("worker_app.worker.process_job_body"):
+        fake_settings.dynamodb_table = "WorkerCustomLog"
+        gr.return_value.Table.return_value = MagicMock()
+        handle_message(msg)
+
+    gr.return_value.Table.assert_called_once_with("WorkerCustomLog")
+    tj.assert_called_once()
+
+
 def test_run_once_false_when_no_messages():
     sqs = MagicMock()
     sqs.receive_message.return_value = {}

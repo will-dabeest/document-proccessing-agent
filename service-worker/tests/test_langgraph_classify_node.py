@@ -79,6 +79,24 @@ def test_classify_node_missing_keys_use_defaults():
     assert out["summary"] == ""
 
 
+def test_classify_node_empty_classification_string_is_not_general():
+    raw = '{"classification": "", "summary": "blank label"}'
+    with patch.object(lg, "_ollama_generate", return_value=raw):
+        out = lg.classify_node({"document_text": "doc"})
+    assert out["classification"] == ""
+    assert out["summary"] == "blank label"
+
+
+def test_classify_node_string_attempts_at_max_skips_repair():
+    with patch.object(lg, "_ollama_generate", return_value="not json") as gen:
+        out = lg.classify_node({"document_text": "d", "attempts": "2"})
+
+    gen.assert_called_once()
+    assert out["classification"] == "Unknown"
+    assert out["summary"] == "not json"
+    assert out["attempts"] == 3
+
+
 def test_ollama_generate_uses_mock_json_when_set(monkeypatch):
     monkeypatch.setenv("LLM_MOCK_JSON", '{"classification": "M", "summary": "S"}')
     import importlib

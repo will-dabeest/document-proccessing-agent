@@ -20,3 +20,11 @@ def test_parse_json_obj_embedded_in_prose():
 def test_parse_json_obj_malformed_raises():
     with pytest.raises(json.JSONDecodeError):
         lg._parse_json_obj("this is not json")
+
+
+def test_parse_json_obj_strips_utf8_bom():
+    raw = '\ufeff{"classification":"Legal","summary":"From BOM"}'
+    assert lg._parse_json_obj(raw) == {
+        "classification": "Legal",
+        "summary": "From BOM",
+    }
