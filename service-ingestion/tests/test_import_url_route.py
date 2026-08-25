@@ -82,6 +82,24 @@ def test_import_url_propagates_url_import_error(mock_s3):
     assert response.json()["detail"] == "Unsupported content type"
 
 
+def test_import_url_uploads_to_configured_bucket(mock_s3, monkeypatch):
+    from app.config import settings
+    from app.main import app
+
+    monkeypatch.setattr(settings, "bucket_name", "custom-ingest-bucket")
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document", new=_fetch_text
+    ), patch("app.main.publish_job_safe"), patch("app.main.index_document"):
+        client = TestClient(app)
+        response = client.post("/import-url", json={"url": "https://example.com/doc"})
+
+    assert response.status_code == 200
+    args = mock_s3.upload_fileobj.call_args[0]
+    assert args[1] == "custom-ingest-bucket"
+    assert args[2].startswith("imports/")
+    assert args[2].endswith(".txt")
+
+
 def test_import_url_disabled_returns_403(mock_s3):
     from app import config
     from app.main import app

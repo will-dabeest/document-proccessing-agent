@@ -108,6 +108,35 @@ def test_documents_maps_dynamo_scan_items():
     mock_resource.Table.assert_called_once()
 
 
+def test_documents_uses_configured_dynamodb_table(monkeypatch):
+    from app.config import settings
+    from app.main import app
+
+    monkeypatch.setattr(settings, "dynamodb_table", "AltProcessLog")
+    mock_table = MagicMock()
+    mock_table.scan.return_value = {"Items": []}
+    mock_resource = MagicMock()
+    mock_resource.Table.return_value = mock_table
+
+    with patch("app.main.get_dynamodb_resource", return_value=mock_resource):
+        client = TestClient(app)
+        response = client.get("/documents")
+
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+    mock_resource.Table.assert_called_once_with("AltProcessLog")
+
+
+def test_lifespan_exposes_configured_ollama_model(monkeypatch):
+    from app.config import settings
+    from app.main import app
+
+    monkeypatch.setattr(settings, "ollama_model", "unit-test-model:tag")
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert app.state.config == {"model": "unit-test-model:tag"}
+
+
 def test_upload_s3_failure_returns_500():
     from app.main import app
 
