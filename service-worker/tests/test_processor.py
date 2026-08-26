@@ -5,6 +5,7 @@ from moto import mock_aws
 
 from worker_app.processor import (
     extract_text_from_object,
+    notify_index,
     process_job_body,
     save_completed,
     try_claim_job,
@@ -27,6 +28,25 @@ def test_extract_text_pdf_delegates_to_pypdf():
     with patch("worker_app.processor.PdfReader", return_value=mock_reader):
         out = extract_text_from_object("report.pdf", b"%PDF-1.4 dummy")
     assert out == "Extracted PDF line"
+
+
+def test_extract_text_txt_pdf_suffix_uses_pypdf():
+    """Routing is suffix-based: `notes.txt.pdf` is a PDF even though `.txt` appears earlier."""
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = "From double extension"
+    mock_reader = MagicMock()
+    mock_reader.pages = [mock_page]
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader) as reader:
+        out = extract_text_from_object("notes.txt.pdf", b"%PDF-1.4 dummy")
+    reader.assert_called_once()
+    assert out == "From double extension"
+
+
+def test_extract_text_pdf_txt_suffix_decodes_utf8_without_pypdf():
+    with patch("worker_app.processor.PdfReader") as reader:
+        out = extract_text_from_object("notes.pdf.txt", b"plain notes")
+    reader.assert_not_called()
+    assert out == "plain notes"
 
 
 @mock_aws
@@ -119,3 +139,16 @@ def test_save_completed_overwrites_item():
     assert item["Status"] == "Completed"
     assert item["Classification"] == "Tech"
     assert item["Summary"] == "Summary text"
+
+
+def test_notify_index_posts_job_filename_and_text():
+    with patch("httpx.post") as post:
+        notify_index("job-42", "notes.txt", "indexed body")
+
+    post.assert_called_once()
+    assert post.call_args.kwargs["json"] == {
+        "job_id": "job-42",
+        "filename": "notes.txt",
+        "text": "indexed body",
+    }
+    assert post.call_args.args[0].endswith("/internal/index")

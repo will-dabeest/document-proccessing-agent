@@ -38,6 +38,17 @@ def test_generate_llama3_missing_response_key():
     assert out == "No answer returned."
 
 
+def test_generate_llama3_numeric_zero_response_uses_fallback_string():
+    """`response: 0` is falsy, so it must not be stringified as '0' for the user."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"response": 0}
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.ollama_client.httpx.post", return_value=mock_resp):
+        out = generate_llama3("p")
+
+    assert out == "No answer returned."
+
+
 def test_generate_llama3_on_exception_returns_unavailable_message():
     with patch(
         "app.ollama_client.httpx.post",

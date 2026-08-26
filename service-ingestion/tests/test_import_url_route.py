@@ -93,3 +93,21 @@ def test_import_url_disabled_returns_403(mock_s3):
         response = client.post("/import-url", json={"url": "https://example.com/x"})
 
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize("url", ["", "   "])
+def test_import_url_empty_or_whitespace_url_returns_400(mock_s3, url):
+    """Empty JSON `url` is valid for pydantic but must fail fetch validation (400, not 422)."""
+    from app.main import app
+
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.publish_job_safe"
+    ) as pub, patch("app.main.index_document") as idx:
+        client = TestClient(app)
+        response = client.post("/import-url", json={"url": url})
+
+    assert response.status_code == 400
+    assert "url" in response.json()["detail"].lower()
+    mock_s3.upload_fileobj.assert_not_called()
+    pub.assert_not_called()
+    idx.assert_not_called()

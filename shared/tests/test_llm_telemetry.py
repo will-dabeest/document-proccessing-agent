@@ -37,3 +37,17 @@ def test_ollama_usage_span_attributes_extracts_known_keys():
     assert attrs["llm.usage.eval_count"] == 3
     assert attrs["llm.usage.total_duration"] == 1_000_000_000
     assert "bogus" not in attrs
+
+
+def test_ollama_usage_span_attributes_includes_duration_breakdown():
+    data = {
+        "load_duration": 11,
+        "prompt_eval_duration": 22,
+        "eval_duration": 33,
+    }
+    attrs = ollama_usage_span_attributes(data)
+    assert attrs == {
+        "llm.usage.load_duration": 11,
+        "llm.usage.prompt_eval_duration": 22,
+        "llm.usage.eval_duration": 33,
+    }

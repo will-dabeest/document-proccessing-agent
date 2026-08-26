@@ -103,3 +103,15 @@ def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection
         "metadatas",
         "distances",
     ]
+
+
+def test_retrieve_context_n_results_zero_is_passed_to_chroma(
+    fake_model, fake_collection
+):
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        retrieve_context("Q?", n_results=0)
+
+    fake_model.encode.assert_called_once()
+    assert fake_collection.query.call_args.kwargs["n_results"] == 0
