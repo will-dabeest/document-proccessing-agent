@@ -24,6 +24,17 @@ def test_parse_job_message_wrong_shape_raises():
         parse_job_message(json.dumps({"foo": 1}))
 
 
+def test_parse_job_message_rejects_utf8_bom():
+    """SQS bodies with a UTF-8 BOM must not parse as jobs (worker should not claim/ack)."""
+    payload = {
+        "s3_key": "a.txt",
+        "idempotency_key": "id-bom",
+        "uploaded_at": "2024-01-01T00:00:00+00:00",
+    }
+    with pytest.raises(ValidationError):
+        parse_job_message("\ufeff" + json.dumps(payload))
+
+
 def test_to_json_dict_has_publisher_fields():
     j = JobMessage(s3_key="doc.txt", idempotency_key="id-1", uploaded_at="2024-06-01T12:00:00+00:00")
     d = j.to_json_dict()
