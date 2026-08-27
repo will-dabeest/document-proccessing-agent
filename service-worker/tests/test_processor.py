@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -119,3 +121,41 @@ def test_save_completed_overwrites_item():
     assert item["Status"] == "Completed"
     assert item["Classification"] == "Tech"
     assert item["Summary"] == "Summary text"
+
+
+def test_extract_text_pdf_under_imports_prefix_uses_pypdf():
+    """URL import stores objects as imports/{uuid}.pdf; routing must use the suffix, not the full key."""
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = "imported pdf text"
+    mock_reader = MagicMock()
+    mock_reader.pages = [mock_page]
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader) as reader:
+        out = extract_text_from_object(
+            "imports/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.pdf",
+            b"%PDF-1.4 dummy",
+        )
+    reader.assert_called_once()
+    assert out == "imported pdf text"
+
+
+def test_extract_text_markdown_under_imports_prefix_decodes_utf8():
+    with patch("worker_app.processor.PdfReader") as reader:
+        out = extract_text_from_object(
+            "imports/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.md",
+            b"# imported markdown",
+        )
+    reader.assert_not_called()
+    assert out == "# imported markdown"
+
+
+def test_try_claim_job_reraises_when_error_code_missing():
+    """A PutItem failure without ConditionalCheckFailedException must not be treated as a duplicate."""
+    table = MagicMock()
+    error = ClientError({}, "PutItem")
+    table.put_item.side_effect = error
+
+    with pytest.raises(ClientError) as exc:
+        try_claim_job(table, "job-malformed-error")
+
+    assert exc.value is error
+    table.get_item.assert_not_called()
