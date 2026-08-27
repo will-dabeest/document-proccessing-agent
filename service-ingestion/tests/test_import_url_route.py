@@ -93,3 +93,23 @@ def test_import_url_disabled_returns_403(mock_s3):
         response = client.post("/import-url", json={"url": "https://example.com/x"})
 
     assert response.status_code == 403
+
+
+def test_import_url_s3_object_key_matches_response_file(mock_s3):
+    """Worker downloads by the published S3 key; it must equal the API `file` field."""
+    from app.main import app
+
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document", new=_fetch_text
+    ), patch("app.main.publish_job_safe") as pub, patch("app.main.index_document"):
+        client = TestClient(app)
+        response = client.post("/import-url", json={"url": "https://example.com/doc"})
+
+    assert response.status_code == 200
+    data = response.json()
+    s3_key = mock_s3.upload_fileobj.call_args.args[2]
+    assert s3_key == data["file"]
+    assert s3_key.startswith("imports/")
+    assert s3_key.endswith(".txt")
+    published_job = pub.call_args.args[0]
+    assert published_job.s3_key == s3_key
