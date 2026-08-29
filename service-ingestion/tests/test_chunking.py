@@ -8,6 +8,11 @@ def test_chunk_text_overlap_invalid_raises():
         chunk_text("abc", chunk_size=100, overlap=100)
 
 
+def test_chunk_text_overlap_greater_than_chunk_size_raises():
+    with pytest.raises(ValueError, match="chunk_size must be greater than overlap"):
+        chunk_text("abcdef", chunk_size=50, overlap=80)
+
+
 def test_chunk_text_empty_returns_empty_list():
     assert chunk_text("") == []
 
