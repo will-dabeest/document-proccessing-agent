@@ -15,6 +15,11 @@ def test_extract_text_plain_utf8():
     assert extract_text_from_object("notes.txt", b"hello world") == "hello world"
 
 
+def test_extract_text_uppercase_txt_decodes_utf8():
+    """Extension checks are case-folded; NOTES.TXT must not be treated as a PDF."""
+    assert extract_text_from_object("NOTES.TXT", b"hello world") == "hello world"
+
+
 def test_extract_text_non_utf8_returns_empty():
     assert extract_text_from_object("binary.bin", b"\xff\xfe\xfd") == ""
 
