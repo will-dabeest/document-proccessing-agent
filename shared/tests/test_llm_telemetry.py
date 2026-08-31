@@ -24,6 +24,17 @@ def test_flatten_distances_flat():
     assert flatten_distances([0.1, 0.2]) == [0.1, 0.2]
 
 
+def test_ollama_usage_span_attributes_skips_string_numeric_values():
+    attrs = ollama_usage_span_attributes(
+        {
+            "prompt_eval_count": "10",
+            "eval_count": 3,
+        }
+    )
+    assert "llm.usage.prompt_eval_count" not in attrs
+    assert attrs["llm.usage.eval_count"] == 3
+
+
 def test_ollama_usage_span_attributes_extracts_known_keys():
     data = {
         "response": "hi",
