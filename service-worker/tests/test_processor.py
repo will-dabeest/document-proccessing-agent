@@ -19,6 +19,13 @@ def test_extract_text_non_utf8_returns_empty():
     assert extract_text_from_object("binary.bin", b"\xff\xfe\xfd") == ""
 
 
+def test_extract_text_pdf_backup_suffix_decodes_utf8_without_pypdf():
+    with patch("worker_app.processor.PdfReader") as pdf:
+        out = extract_text_from_object("report.pdf.backup", b"not a pdf wrapper")
+    assert out == "not a pdf wrapper"
+    pdf.assert_not_called()
+
+
 def test_extract_text_pdf_delegates_to_pypdf():
     mock_page = MagicMock()
     mock_page.extract_text.return_value = "Extracted PDF line"

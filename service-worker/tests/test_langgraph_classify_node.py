@@ -1,7 +1,7 @@
 """Unit tests for classify_node and _ollama_generate edge cases (mocked LLM)."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -127,3 +127,46 @@ def test_classify_node_after_ollama_http_failure_parses_fallback():
 
     assert out["classification"] == "Unknown"
     assert "unavailable" in (out.get("summary") or "").lower()
+
+
+def test_ollama_generate_numeric_response_returns_fallback_json():
+    """Ollama may return a non-string `response`; `.strip()` must not crash the job."""
+    fake_settings = SimpleNamespace(
+        llm_mock_json=None,
+        ollama_base_url="http://127.0.0.1:9",
+        ollama_model="llama3",
+        ollama_http_timeout_seconds=1.0,
+    )
+    mock_resp = MagicMock(status_code=200)
+    mock_resp.json.return_value = {"response": 42}
+    mock_resp.raise_for_status = MagicMock()
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", return_value=mock_resp
+    ):
+        out = lg._ollama_generate("prompt")
+
+    data = lg._parse_json_obj(out)
+    assert data["classification"] == "Unknown"
+    assert "unavailable" in data["summary"].lower()
+
+
+def test_ollama_generate_empty_mock_json_falls_through_to_http():
+    """Empty LLM_MOCK_JSON is falsy and must not skip the real generate call."""
+    fake_settings = SimpleNamespace(
+        llm_mock_json="",
+        ollama_base_url="http://ollama.test:11434",
+        ollama_model="llama3",
+        ollama_http_timeout_seconds=1.0,
+    )
+    mock_resp = MagicMock(status_code=200)
+    mock_resp.json.return_value = {
+        "response": '{"classification": "Tech", "summary": "From HTTP."}'
+    }
+    mock_resp.raise_for_status = MagicMock()
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", return_value=mock_resp
+    ) as post:
+        out = lg._ollama_generate("prompt")
+
+    post.assert_called_once()
+    assert out == '{"classification": "Tech", "summary": "From HTTP."}'
