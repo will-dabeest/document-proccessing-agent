@@ -30,3 +30,12 @@ def test_chunk_text_multiple_chunks_with_overlap():
 def test_chunk_text_exact_chunk_boundary():
     text = "0123456789"  # 10 chars
     assert chunk_text(text, chunk_size=10, overlap=2) == ["0123456789"]
+
+
+def test_chunk_text_splits_unicode_by_characters_not_bytes():
+    """RAG overlap math is in Python characters, so CJK must not be split as UTF-8 bytes."""
+    text = "你好世界"  # 4 chars, 12 UTF-8 bytes
+    assert chunk_text(text, chunk_size=2, overlap=0) == ["你好", "世界"]
+    overlapped = chunk_text(text, chunk_size=3, overlap=1)
+    assert overlapped[0] == "你好世"
+    assert overlapped[1] == "世界"

@@ -127,3 +127,28 @@ def test_classify_node_after_ollama_http_failure_parses_fallback():
 
     assert out["classification"] == "Unknown"
     assert "unavailable" in (out.get("summary") or "").lower()
+
+
+def test_ollama_generate_whitespace_mock_json_skips_http():
+    """Whitespace-only LLM_MOCK_JSON is truthy, unlike empty string, so HTTP is skipped."""
+    fake_settings = SimpleNamespace(
+        llm_mock_json="   ",
+        ollama_base_url="http://ollama.test:11434",
+        ollama_model="llama3",
+        ollama_http_timeout_seconds=1.0,
+    )
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post"
+    ) as post:
+        out = lg._ollama_generate("prompt")
+
+    post.assert_not_called()
+    assert out == "   "
+
+
+def test_worker_settings_read_ollama_http_timeout_seconds(monkeypatch):
+    from worker_app.config import Settings as WorkerSettings
+
+    monkeypatch.setenv("OLLAMA_HTTP_TIMEOUT_SECONDS", "7.25")
+    settings = WorkerSettings(_env_file=None)
+    assert settings.ollama_http_timeout_seconds == 7.25

@@ -83,6 +83,26 @@ def test_process_job_body_invokes_run_agent_save_and_notify():
     ni.assert_called_once_with("job-x", "file.txt", "extracted")
 
 
+def test_process_job_body_empty_classification_is_saved_as_empty():
+    """Missing classification defaults to Unknown; an explicit empty string is persisted."""
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"bytes"
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value="extracted"
+    ), patch(
+        "worker_app.processor.run_agent",
+        return_value={"classification": "", "summary": "kept"},
+    ), patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ):
+        process_job_body("job-empty-cls", "file.txt", tbl)
+
+    sc.assert_called_once_with(tbl, "job-empty-cls", "", "kept")
+
+
 def test_process_job_body_empty_extract_skips_notify_index():
     tbl = MagicMock()
     with patch(

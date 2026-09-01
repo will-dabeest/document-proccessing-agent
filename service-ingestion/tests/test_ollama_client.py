@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+from app.config import Settings
 from app.ollama_client import generate_llama3
 
 
@@ -48,3 +49,9 @@ def test_generate_llama3_on_exception_returns_unavailable_message():
     assert out == (
         "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
     )
+
+
+def test_settings_read_ollama_http_timeout_seconds(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HTTP_TIMEOUT_SECONDS", "12.5")
+    settings = Settings(_env_file=None)
+    assert settings.ollama_http_timeout_seconds == 12.5

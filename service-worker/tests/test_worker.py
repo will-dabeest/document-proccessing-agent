@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
@@ -102,6 +103,20 @@ def test_run_once_deletes_on_success():
     sqs.delete_message.assert_called_once_with(
         QueueUrl="http://q", ReceiptHandle="rh-1"
     )
+
+
+@pytest.mark.parametrize("body", ["null", "[]", "true", "0"])
+def test_handle_message_non_object_json_body_does_not_claim(body):
+    """Valid JSON that is not an object must fail the job schema before Dynamo claim."""
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job"
+    ) as tj, patch("worker_app.worker.process_job_body") as proc:
+        with pytest.raises(ValidationError):
+            handle_message({"Body": body})
+
+    gr.assert_not_called()
+    tj.assert_not_called()
+    proc.assert_not_called()
 
 
 def test_run_once_no_delete_when_handle_message_raises():
