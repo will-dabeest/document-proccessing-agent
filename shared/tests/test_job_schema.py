@@ -30,3 +30,22 @@ def test_to_json_dict_has_publisher_fields():
     assert d["s3_key"] == "doc.txt"
     assert d["idempotency_key"] == "id-1"
     assert d["uploaded_at"] == "2024-06-01T12:00:00+00:00"
+
+
+def test_parse_job_message_ignores_unknown_fields():
+    """Forward-compatible extras must not fail claim/parse (pydantic extra=ignore)."""
+    raw = json.dumps(
+        {
+            "s3_key": "a.txt",
+            "idempotency_key": "id-extra",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+            "unexpected": {"nested": True},
+            "priority": 9,
+        }
+    )
+    job = parse_job_message(raw)
+    dumped = job.model_dump()
+    assert job.s3_key == "a.txt"
+    assert job.idempotency_key == "id-extra"
+    assert "unexpected" not in dumped
+    assert "priority" not in dumped
