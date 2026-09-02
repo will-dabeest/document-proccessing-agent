@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.ollama_client import generate_llama3
 
 
@@ -48,3 +50,21 @@ def test_generate_llama3_on_exception_returns_unavailable_message():
     assert out == (
         "LLM unavailable; install Ollama and pull the model set in OLLAMA_MODEL."
     )
+
+
+@pytest.mark.parametrize(
+    "response_value, expected",
+    [
+        ({"text": "nested"}, "{'text': 'nested'}"),
+        (["chunk-a", "chunk-b"], "['chunk-a', 'chunk-b']"),
+    ],
+)
+def test_generate_llama3_non_string_response_is_stringified(response_value, expected):
+    """Unlike the worker, ingestion does str(response).strip() so dict/list become the answer."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"response": response_value}
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.ollama_client.httpx.post", return_value=mock_resp):
+        out = generate_llama3("p")
+
+    assert out == expected

@@ -1,7 +1,7 @@
 """Unit tests for classify_node and _ollama_generate edge cases (mocked LLM)."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -127,3 +127,28 @@ def test_classify_node_after_ollama_http_failure_parses_fallback():
 
     assert out["classification"] == "Unknown"
     assert "unavailable" in (out.get("summary") or "").lower()
+
+
+@pytest.mark.parametrize(
+    "response_value",
+    [{"text": "nested"}, ["chunk-a"]],
+)
+def test_ollama_generate_non_string_response_returns_fallback_json(response_value):
+    """Worker calls .strip() on response; dict/list raise AttributeError → fallback JSON."""
+    fake_settings = SimpleNamespace(
+        llm_mock_json=None,
+        ollama_base_url="http://ollama.test:11434",
+        ollama_model="llama3",
+        ollama_http_timeout_seconds=1.0,
+    )
+    mock_resp = MagicMock(status_code=200)
+    mock_resp.json.return_value = {"response": response_value}
+    mock_resp.raise_for_status = MagicMock()
+    with patch.object(lg, "settings", fake_settings), patch.object(
+        lg.httpx, "post", return_value=mock_resp
+    ):
+        out = lg._ollama_generate("prompt")
+
+    data = lg._parse_json_obj(out)
+    assert data["classification"] == "Unknown"
+    assert "unavailable" in data["summary"].lower()
