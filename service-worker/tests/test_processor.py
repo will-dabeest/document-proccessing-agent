@@ -29,6 +29,15 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_html_and_htm_decode_utf8_without_pypdf():
+    """Only `.pdf` (case-insensitive) uses pypdf; uploaded HTML must not go through PdfReader."""
+    html = b"<html><body>Hello from HTML</body></html>"
+    with patch("worker_app.processor.PdfReader") as reader:
+        assert extract_text_from_object("notes.html", html) == html.decode("utf-8")
+        assert extract_text_from_object("Page.HTM", html) == html.decode("utf-8")
+    reader.assert_not_called()
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(
