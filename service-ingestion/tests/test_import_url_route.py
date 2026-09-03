@@ -37,6 +37,38 @@ def test_import_url_success(mock_s3):
     mock_s3.upload_fileobj.assert_called_once()
 
 
+def test_import_url_ignores_extra_json_fields_for_storage_key_and_job_id(mock_s3):
+    """ImportUrlRequest only binds `url`. Caller-supplied s3_key/job_id must not select the object key."""
+    from app.main import app
+
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document", new=_fetch_text
+    ), patch("app.main.publish_job_safe") as pub, patch("app.main.index_document") as idx:
+        client = TestClient(app)
+        response = client.post(
+            "/import-url",
+            json={
+                "url": "https://example.com/doc",
+                "s3_key": "../passwd",
+                "job_id": "attacker-chosen",
+                "file": "owned.txt",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "imported"
+    assert data["file"].startswith("imports/")
+    assert data["file"].endswith(".txt")
+    assert "../passwd" not in data["file"]
+    assert "owned" not in data["file"]
+    assert data["job_id"] != "attacker-chosen"
+    pub.assert_called_once()
+    idx.assert_called_once()
+    uploaded_key = mock_s3.upload_fileobj.call_args.args[2]
+    assert uploaded_key == data["file"]
+
+
 def test_import_url_pdf_skips_sync_index(mock_s3):
     from app.main import app
 
