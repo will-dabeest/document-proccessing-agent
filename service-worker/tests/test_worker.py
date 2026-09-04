@@ -19,6 +19,22 @@ def test_extract_trace_from_message_with_traceparent():
     assert ctx is not None
 
 
+def test_extract_trace_from_message_ignores_binary_and_non_dict_traceparent():
+    """SQS BinaryValue or a bare string must not crash extract; both skip propagation."""
+    binary_msg = {
+        "MessageAttributes": {"traceparent": {"BinaryValue": b"not-a-string-value"}}
+    }
+    string_msg = {
+        "MessageAttributes": {
+            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        }
+    }
+    list_msg = {"MessageAttributes": {"traceparent": ["not-a-dict"]}}
+    assert extract_trace_from_message(binary_msg) is not None
+    assert extract_trace_from_message(string_msg) is not None
+    assert extract_trace_from_message(list_msg) is not None
+
+
 def test_handle_message_duplicate_done_skips_process():
     body = json.dumps(
         {

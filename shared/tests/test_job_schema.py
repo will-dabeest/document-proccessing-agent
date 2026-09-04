@@ -19,6 +19,16 @@ def test_parse_job_message_invalid_json_raises():
         parse_job_message("not json")
 
 
+def test_parse_job_message_allows_surrounding_whitespace():
+    raw = (
+        '\n\t{"s3_key": "a.txt", "idempotency_key": "id-ws",'
+        ' "uploaded_at": "2024-01-01T00:00:00+00:00"}\n  '
+    )
+    job = parse_job_message(raw)
+    assert job.s3_key == "a.txt"
+    assert job.idempotency_key == "id-ws"
+
+
 def test_parse_job_message_wrong_shape_raises():
     with pytest.raises(ValidationError):
         parse_job_message(json.dumps({"foo": 1}))

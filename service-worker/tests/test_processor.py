@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -29,6 +30,15 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_json_and_csv_decode_utf8_without_pypdf():
+    """Only `.pdf` uses pypdf; JSON/CSV uploads must decode as text even with uppercase extensions."""
+    payload = b'{"hello": "world"}'
+    with patch("worker_app.processor.PdfReader") as reader:
+        assert extract_text_from_object("events.json", payload) == '{"hello": "world"}'
+        assert extract_text_from_object("Export.CSV", b"a,b\n1,2") == "a,b\n1,2"
+    reader.assert_not_called()
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(
@@ -41,6 +51,23 @@ def test_try_claim_job_claimed_then_duplicate_inflight():
     jid = "job-claim-1"
     assert try_claim_job(table, jid) == "claimed"
     assert try_claim_job(table, jid) == "duplicate_inflight"
+
+
+def test_try_claim_job_missing_item_after_conditional_fail_is_duplicate_inflight():
+    """Row vanished between put and get (lost race / TTL). Treat as inflight so SQS can retry."""
+    table = MagicMock()
+    table.put_item.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ConditionalCheckFailedException",
+                "Message": "The conditional request failed",
+            }
+        },
+        "PutItem",
+    )
+    table.get_item.return_value = {}
+    assert try_claim_job(table, "job-gone") == "duplicate_inflight"
+    table.get_item.assert_called_once_with(Key={"MessageId": "job-gone"})
 
 
 @mock_aws
