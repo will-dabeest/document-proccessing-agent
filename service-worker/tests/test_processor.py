@@ -29,6 +29,18 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_uppercase_pdf_extension_uses_pypdf():
+    """Extension check is case-insensitive; Report.PDF must not fall through to UTF-8 decode."""
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = "From PDF"
+    mock_reader = MagicMock()
+    mock_reader.pages = [mock_page]
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader) as reader:
+        out = extract_text_from_object("Report.PDF", b"%PDF-1.4 dummy")
+    assert out == "From PDF"
+    reader.assert_called_once()
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(
