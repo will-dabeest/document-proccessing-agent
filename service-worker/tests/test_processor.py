@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -27,6 +28,15 @@ def test_extract_text_pdf_delegates_to_pypdf():
     with patch("worker_app.processor.PdfReader", return_value=mock_reader):
         out = extract_text_from_object("report.pdf", b"%PDF-1.4 dummy")
     assert out == "Extracted PDF line"
+
+
+@pytest.mark.parametrize("key", ["report.docx", "sheet.XLSX"])
+def test_extract_office_binary_skips_pdf_reader_and_returns_empty(key):
+    """Only .pdf keys use pypdf; Office binaries fail UTF-8 decode and index nothing."""
+    with patch("worker_app.processor.PdfReader") as pdf:
+        out = extract_text_from_object(key, b"PK\x03\x04\xff\xfe")
+    assert out == ""
+    pdf.assert_not_called()
 
 
 @mock_aws
