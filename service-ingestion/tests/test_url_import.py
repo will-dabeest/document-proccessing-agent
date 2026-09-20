@@ -1,11 +1,69 @@
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 
 from app.url_import import (
     UrlImportError,
     _classify_body,
     _parse_and_validate_url,
+    fetch_url_document,
     raise_for_private_or_meta_hosts,
 )
+
+
+def _url_import_settings(**overrides):
+    values = {
+        "url_import_enabled": True,
+        "url_import_max_bytes": 1024,
+        "url_import_max_redirects": 5,
+        "url_import_timeout_seconds": 1.0,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+class _FakeStreamResponse:
+    def __init__(self, status_code=200, headers=None, chunks=()):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._chunks = list(chunks)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def aread(self):
+        return b"".join(self._chunks)
+
+    def raise_for_status(self):
+        return None
+
+    async def aiter_bytes(self):
+        for chunk in self._chunks:
+            yield chunk
+
+
+class _FakeAsyncClient:
+    def __init__(self, responses, requests):
+        self._responses = list(responses)
+        self._requests = requests
+
+    def __call__(self, *_args, **_kwargs):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def stream(self, method, url):
+        self._requests.append((method, url))
+        return self._responses.pop(0)
 
 
 def test_parse_rejects_file_scheme():
@@ -57,3 +115,342 @@ def test_html_to_plain_text_trafilatura_smoke():
     raw = b"<html><body><article><p>UniqueMarkerAlpha beta</p></article></body></html>"
     out = _html_to_plain_text(raw)
     assert b"UniqueMarkerAlpha" in out
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "198.51.100.0x1",  # last-octet hex TEST-NET-2
+    ],
+)
+def test_raise_for_private_blocks_last_octet_hex_test_net_2(host):
+    """ipaddress rejects 198.51.100.0x1; glibc maps it to 198.51.100.1.
+
+    Distinct from last-octet octal TEST-NET-2 198.51.0144.1 (#100) and
+    mixed third-octet hex 198.51.0x64.1 in this file.
+    """
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(host)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "203.0.113.0x1",  # last-octet hex TEST-NET-3
+    ],
+)
+def test_raise_for_private_blocks_last_octet_hex_test_net_3(host):
+    """ipaddress rejects 203.0.113.0x1; glibc maps it to 203.0.113.1.
+
+    Distinct from last-octet octal TEST-NET-3 203.0.0161.1 (#99).
+    """
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(host)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "198.51.0x64.1",  # mixed third-octet hex TEST-NET-2
+    ],
+)
+def test_raise_for_private_blocks_mixed_third_octet_hex_test_net_2(host):
+    """ipaddress rejects 198.51.0x64.1; glibc maps it to 198.51.100.1.
+
+    Distinct from mixed first-two-octet hex 0xc6.0x33.100.1 (#100) and
+    last-octet hex 198.51.100.0x1 in this file.
+    """
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(host)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "192.0.0x2.1",  # mixed third-octet hex TEST-NET-1
+    ],
+)
+def test_raise_for_private_blocks_mixed_third_octet_hex_test_net_1(host):
+    """ipaddress rejects 192.0.0x2.1; glibc maps it to 192.0.2.1.
+
+    Distinct from four-part hex 0xc0.0.2.1 (#96) and two-octet encoded
+    0300.2 / 0xc0.2 in this file (those map to 192.0.0.2).
+    """
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(host)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "192.0.0.0x1",  # last-octet hex IETF host
+    ],
+)
+def test_raise_for_private_blocks_last_octet_hex_ietf_host(host):
+    """ipaddress rejects 192.0.0.0x1; glibc maps it to 192.0.0.1.
+
+    Distinct from four-part hex 0xc0.0.0.1 (#98) and integer-hex IETF
+    host 0xc0000001 (#98).
+    """
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(host)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "0300.2",  # two-octet octal TEST-NET-1 / IETF 192.0.0.2
+        "0xc0.2",  # two-octet hex TEST-NET-1 / IETF 192.0.0.2
+    ],
+)
+def test_raise_for_private_blocks_encoded_two_octet_test_net_1(host):
+    """ipaddress rejects these; glibc maps 0300.2 / 0xc0.2 to 192.0.0.2.
+
+    Distinct from decimal two-octet 192.0.2 (#97), which maps to
+    192.0.0.2 as well but is a different literal, and from two-octet
+    IETF network 0300.0 / 0xc0.0 (#100), which map to 192.0.0.0.
+    """
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(host)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "::ffff:192.88.99.0",  # IPv4-mapped 6to4 relay anycast .0: reserved-only
+        "::ffff:0:192.88.99.0",  # SIIT 6to4 relay anycast .0: reserved-only
+        "64:ff9b::192.88.99.0",  # NAT64 6to4 relay anycast .0: reserved-only
+        "2002:c058:6300::",  # 6to4 of 192.88.99.0: private, not reserved
+    ],
+)
+def test_raise_for_private_blocks_6to4_relay_anycast_dot0_ipv6_encodings(host):
+    """6to4 relay anycast 192.88.99.0 IPv6 aliases are reserved or private.
+
+    Distinct from 192.88.99.1 encodings (#96), 192.88.99.2 encodings
+    (#99), and 192.88.99.255 encodings (#100). Mapped / SIIT / NAT64 are
+    reserved-only and not private; dropping reserved would allow those
+    fetches. 6to4 is private-only. Bare 192.88.99.0 is currently
+    is_global (allowed; needs prod).
+    """
+    with pytest.raises(UrlImportError) as exc:
+        raise_for_private_or_meta_hosts(host)
+    assert exc.value.status_code == 403
+
+
+def test_fetch_last_octet_hex_test_net_2_is_blocked_before_get():
+    """198.51.100.0x1 is an ipaddress miss; glibc maps it to 198.51.100.1.
+
+    Fetch must 403 before GET. Distinct from last-octet octal
+    198.51.0144.1 (#100).
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document(
+                    "https://198.51.100.0x1/secret", _url_import_settings()
+                )
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
+
+
+def test_fetch_last_octet_hex_test_net_3_is_blocked_before_get():
+    """203.0.113.0x1 is an ipaddress miss; glibc maps it to 203.0.113.1.
+
+    Fetch must 403 before GET. Distinct from last-octet octal
+    203.0.0161.1 (#99).
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document(
+                    "https://203.0.113.0x1/secret", _url_import_settings()
+                )
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
+
+
+def test_fetch_mixed_third_octet_hex_test_net_2_is_blocked_before_get():
+    """198.51.0x64.1 is an ipaddress miss; glibc maps it to 198.51.100.1.
+
+    Fetch must 403 before GET. Distinct from mixed first-two-octet hex
+    0xc6.0x33.100.1 (#100).
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document(
+                    "https://198.51.0x64.1/secret", _url_import_settings()
+                )
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
+
+
+def test_fetch_mixed_third_octet_hex_test_net_1_is_blocked_before_get():
+    """192.0.0x2.1 is an ipaddress miss; glibc maps it to 192.0.2.1.
+
+    Fetch must 403 before GET. Distinct from four-part hex 0xc0.0.2.1
+    (#96).
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document(
+                    "https://192.0.0x2.1/secret", _url_import_settings()
+                )
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
+
+
+def test_fetch_last_octet_hex_ietf_host_is_blocked_before_get():
+    """192.0.0.0x1 is an ipaddress miss; glibc maps it to 192.0.0.1.
+
+    Fetch must 403 before GET. Distinct from four-part hex 0xc0.0.0.1
+    (#98).
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document(
+                    "https://192.0.0.0x1/secret", _url_import_settings()
+                )
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
+
+
+def test_fetch_two_octet_hex_test_net_1_is_blocked_before_get():
+    """0xc0.2 is an ipaddress miss; glibc maps it to 192.0.0.2.
+
+    Fetch must 403 before GET. Distinct from hex two-octet IETF network
+    0xc0.0 (#100) and decimal two-octet 192.0.2 (#97).
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document("https://0xc0.2/secret", _url_import_settings())
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
+
+
+def test_fetch_two_octet_octal_test_net_1_is_blocked_before_get():
+    """0300.2 is an ipaddress miss; glibc maps it to 192.0.0.2.
+
+    Fetch must 403 before GET. Distinct from octal two-octet IETF
+    network 0300.0 (#100) and hex two-octet 0xc0.2 in this file.
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document("https://0300.2/secret", _url_import_settings())
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
+
+
+def test_fetch_mapped_6to4_relay_anycast_dot0_is_blocked_before_get():
+    """[::ffff:192.88.99.0] is reserved-only; fetch must 403 before GET.
+
+    Distinct from mapped 192.88.99.1 (#96), mapped 192.88.99.2 (#99),
+    and mapped 192.88.99.255 (#100). Bare 192.88.99.0 is currently
+    allowed; the mapped encoding is not.
+    """
+    requests: list[tuple[str, str]] = []
+    client = _FakeAsyncClient(
+        [
+            _FakeStreamResponse(
+                headers={"content-type": "text/plain"},
+                chunks=(b"should-not-read",),
+            )
+        ],
+        requests,
+    )
+    with patch("app.url_import.httpx.AsyncClient", client):
+        with pytest.raises(UrlImportError) as exc:
+            asyncio.run(
+                fetch_url_document(
+                    "https://[::ffff:192.88.99.0]/secret", _url_import_settings()
+                )
+            )
+    assert exc.value.status_code == 403
+    assert requests == []
