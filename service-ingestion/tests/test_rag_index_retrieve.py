@@ -91,6 +91,34 @@ def test_retrieve_context_passes_n_results_to_query(fake_model, fake_collection)
     assert dists == [0.1, 0.2]
 
 
+def test_retrieve_context_records_exact_zero_and_numeric_string_distances(
+    fake_model, fake_collection
+):
+    """Chroma may report 0.0 for an exact hit, or numeric strings; both must survive."""
+    fake_collection.query.return_value = {
+        "documents": [["exact match", "nearby"]],
+        "metadatas": [[{"file": "a.txt"}, {"file": "b.txt"}]],
+        "distances": [["0.0", 2]],
+    }
+    span = MagicMock()
+    span.__enter__.return_value = span
+    span.__exit__.return_value = False
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ), patch("app.rag_service.tracer") as tracer:
+        tracer.start_as_current_span.return_value = span
+        docs, _metas, dists = retrieve_context("exact?", n_results=2)
+
+    assert docs == ["exact match", "nearby"]
+    assert dists == [0.0, 2.0]
+    attrs = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+    assert attrs["rag.distance_min"] == 0.0
+    assert attrs["rag.distance_max"] == 2.0
+    assert attrs["rag.distance_mean"] == 1.0
+    assert attrs["rag.empty_retrieval"] is False
+    assert attrs["rag.n_chunks_returned"] == 2
+
+
 def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection):
     with patch("app.rag_service._get_model", return_value=fake_model), patch(
         "app.rag_service._get_collection", return_value=fake_collection
