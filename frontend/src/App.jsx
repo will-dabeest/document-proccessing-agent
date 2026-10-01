@@ -2,6 +2,8 @@ import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { formatImportErrorDetail } from "./importError.js";
+
 const api = axios.create({ baseURL: "/api" });
 
 function StatusBadge({ status }) {
@@ -123,11 +125,7 @@ export default function App() {
         </div>
         {importUrlMutation.isError && (
           <p className="mt-2 text-sm text-red-600">
-            {(() => {
-              const d = importUrlMutation.error?.response?.data?.detail;
-              if (d == null) return "Import failed.";
-              return typeof d === "string" ? d : JSON.stringify(d);
-            })()}
+            {formatImportErrorDetail(importUrlMutation.error)}
           </p>
         )}
         {importUrlMutation.isSuccess && (
