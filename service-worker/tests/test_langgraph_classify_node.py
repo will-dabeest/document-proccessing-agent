@@ -127,3 +127,51 @@ def test_classify_node_after_ollama_http_failure_parses_fallback():
 
     assert out["classification"] == "Unknown"
     assert "unavailable" in (out.get("summary") or "").lower()
+
+
+def test_classify_node_unknown_summary_slice_stops_at_500_chars():
+    """Invalid model text stored on the job is capped so Dynamo items stay bounded."""
+    for size in (500, 501):
+        raw = "x" * size
+        calls = {"n": 0}
+
+        def fake_generate(prompt: str, text: str = raw, counter: dict = calls, **_kwargs: object) -> str:
+            counter["n"] += 1
+            return text
+
+        with patch.object(lg, "_ollama_generate", side_effect=fake_generate):
+            out = lg.classify_node({"document_text": "d", "attempts": 2})
+        assert out["classification"] == "Unknown"
+        assert out["summary"] == raw[:500]
+        assert len(out["summary"]) == 500
+        assert out["attempts"] == 3
+        assert calls["n"] == 1
+
+
+def test_classify_node_repair_failure_caps_summary_at_500_chars():
+    raw = "not-json"
+    fixed = "y" * 501
+
+    def fake_generate(prompt: str, **_kwargs: object) -> str:
+        if "invalid JSON" in prompt:
+            return fixed
+        return raw
+
+    with patch.object(lg, "_ollama_generate", side_effect=fake_generate):
+        out = lg.classify_node({"document_text": "doc", "attempts": 0})
+
+    assert out["classification"] == "Unknown"
+    assert out["summary"] == fixed[:500]
+    assert len(out["summary"]) == 500
+    assert out["attempts"] == 2
+
+
+def test_classify_node_valid_json_keeps_summary_longer_than_500_chars():
+    summary = "s" * 501
+    raw = '{"classification": "Legal", "summary": "' + summary + '"}'
+    with patch.object(lg, "_ollama_generate", return_value=raw):
+        out = lg.classify_node({"document_text": "doc", "attempts": 0})
+    assert out["classification"] == "Legal"
+    assert out["summary"] == summary
+    assert len(out["summary"]) == 501
+    assert out["attempts"] == 0
