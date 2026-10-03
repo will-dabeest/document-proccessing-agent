@@ -2,24 +2,31 @@ import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import {
+  documentRowKey,
+  documentsFromResponse,
+  isCompletedStatus,
+  statusBadgeLabel,
+} from "./documentList.js";
+
 const api = axios.create({ baseURL: "/api" });
 
 function StatusBadge({ status }) {
-  const done = status === "Completed";
+  const done = isCompletedStatus(status);
   return (
     <span
       className={`rounded px-2 py-1 text-sm ${
         done ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"
       }`}
     >
-      {status || "Unknown"}
+      {statusBadgeLabel(status)}
     </span>
   );
 }
 
 async function fetchDocuments() {
   const { data } = await api.get("/documents");
-  return data.items || [];
+  return documentsFromResponse(data);
 }
 
 export default function App() {
@@ -148,7 +155,7 @@ export default function App() {
           )}
           {documents.map((row, idx) => (
             <li
-              key={row.message_id || `row-${idx}`}
+              key={documentRowKey(row, idx)}
               className="flex flex-wrap items-center justify-between gap-2 py-3"
             >
               <span className="font-mono text-xs text-slate-700">
