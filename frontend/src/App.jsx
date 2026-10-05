@@ -2,6 +2,8 @@ import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { formatAskSnippet } from "./askSnippet.js";
+
 const api = axios.create({ baseURL: "/api" });
 
 function StatusBadge({ status }) {
@@ -190,7 +192,7 @@ export default function App() {
                 </summary>
                 <ul className="mt-2 list-inside list-disc text-slate-600">
                   {askResult.snippets.map((s, i) => (
-                    <li key={i}>{s.text?.slice(0, 200)}…</li>
+                    <li key={i}>{formatAskSnippet(s.text)}</li>
                   ))}
                 </ul>
               </details>
