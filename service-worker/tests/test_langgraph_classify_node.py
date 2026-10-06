@@ -79,6 +79,16 @@ def test_classify_node_missing_keys_use_defaults():
     assert out["summary"] == ""
 
 
+def test_classify_node_blank_fields_are_not_replaced_by_defaults():
+    """A present empty string is not a missing key, so it must not become General."""
+    raw = '{"classification": "", "summary": ""}'
+    with patch.object(lg, "_ollama_generate", return_value=raw):
+        out = lg.classify_node({"document_text": "anything", "attempts": 1})
+    assert out["classification"] == ""
+    assert out["summary"] == ""
+    assert out["attempts"] == 1
+
+
 def test_ollama_generate_uses_mock_json_when_set(monkeypatch):
     monkeypatch.setenv("LLM_MOCK_JSON", '{"classification": "M", "summary": "S"}')
     import importlib
