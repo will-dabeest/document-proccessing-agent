@@ -2,6 +2,15 @@ import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import {
+  buildImportUrlBody,
+  buildUploadForm,
+  canSubmitImportUrl,
+  canSubmitUpload,
+  documentsInvalidationFilter,
+  documentsListQuery,
+} from "./clientContracts.js";
+
 const api = axios.create({ baseURL: "/api" });
 
 function StatusBadge({ status }) {
@@ -29,29 +38,26 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [askResult, setAskResult] = useState(null);
 
-  const { data: documents = [], isFetching } = useQuery({
-    queryKey: ["documents"],
-    queryFn: fetchDocuments,
-    refetchInterval: 3000,
-  });
+  const { data: documents = [], isFetching } = useQuery(
+    documentsListQuery(fetchDocuments),
+  );
 
   const uploadMutation = useMutation({
     mutationFn: async (f) => {
-      const form = new FormData();
-      form.append("file", f);
-      return api.post("/upload", form, {
+      return api.post("/upload", buildUploadForm(f), {
         headers: { "Content-Type": "multipart/form-data" },
       });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["documents"] }),
+    onSuccess: () =>
+      queryClient.invalidateQueries(documentsInvalidationFilter()),
   });
 
   const importUrlMutation = useMutation({
     mutationFn: async (url) => {
-      return api.post("/import-url", { url: url.trim() });
+      return api.post("/import-url", buildImportUrlBody(url));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries(documentsInvalidationFilter());
       setImportUrl("");
     },
   });
@@ -84,7 +90,7 @@ export default function App() {
           />
           <button
             type="button"
-            disabled={!file || uploadMutation.isPending}
+            disabled={!canSubmitUpload(file) || uploadMutation.isPending}
             onClick={() => file && uploadMutation.mutate(file)}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
           >
@@ -114,7 +120,7 @@ export default function App() {
           />
           <button
             type="button"
-            disabled={!importUrl.trim() || importUrlMutation.isPending}
+            disabled={!canSubmitImportUrl(importUrl) || importUrlMutation.isPending}
             onClick={() => importUrlMutation.mutate(importUrl)}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
           >
