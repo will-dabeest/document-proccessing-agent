@@ -20,7 +20,7 @@ alwaysApply: false
 ## Changes
 
 - Follow existing component and file organization; keep UI changes consistent with current Tailwind usage.
-- There is no `npm test` script in this package yet; rely on `npm run build` for a compile check after non-trivial edits.
+- `npm test` runs `node --test tests/*.test.js` from `frontend/` and needs no extra install. Use `node --test tests/*.test.js`, not `node --test tests`. After non-trivial edits, run `npm test` and `npm run build`.
 
 ## Local development
 
