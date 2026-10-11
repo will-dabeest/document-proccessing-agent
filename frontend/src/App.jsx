@@ -2,6 +2,8 @@ import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { buildAskBody } from "./askRequest.js";
+
 const api = axios.create({ baseURL: "/api" });
 
 function StatusBadge({ status }) {
@@ -58,7 +60,7 @@ export default function App() {
 
   async function submitAsk() {
     setAskResult(null);
-    const { data } = await api.post("/ask", { question });
+    const { data } = await api.post("/ask", buildAskBody(question));
     setAskResult(data);
   }
 
