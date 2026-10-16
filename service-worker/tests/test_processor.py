@@ -5,6 +5,7 @@ from moto import mock_aws
 
 from worker_app.processor import (
     extract_text_from_object,
+    notify_index,
     process_job_body,
     save_completed,
     try_claim_job,
@@ -101,6 +102,25 @@ def test_process_job_body_empty_extract_skips_notify_index():
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
     ni.assert_not_called()
+
+
+def test_notify_index_posts_internal_index_payload():
+    with patch(
+        "worker_app.processor.settings.ingestion_base_url",
+        "http://ingestion:8000/",
+    ), patch("httpx.post") as post:
+        notify_index("job-123", "file.txt", "indexed text")
+
+    post.assert_called_once_with(
+        "http://ingestion:8000/internal/index",
+        json={"job_id": "job-123", "filename": "file.txt", "text": "indexed text"},
+        timeout=30.0,
+    )
+
+
+def test_notify_index_swallowing_callback_errors():
+    with patch("httpx.post", side_effect=RuntimeError("ingestion down")):
+        notify_index("job-123", "file.txt", "indexed text")
 
 
 @mock_aws
