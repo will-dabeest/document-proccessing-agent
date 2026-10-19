@@ -78,6 +78,33 @@ def test_handle_message_claimed_runs_process():
     proc.assert_called_once_with("jid-3", "g.txt", tbl)
 
 
+def test_handle_message_dedupes_on_job_idempotency_key_not_sqs_message_id():
+    """Republish creates a new SQS MessageId; claim must follow the job body key."""
+    body = json.dumps(
+        {
+            "s3_key": "reports/q1.txt",
+            "idempotency_key": "job-idem-1",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    msg = {
+        "MessageId": "sqs-msg-other",
+        "ReceiptHandle": "rh-republish",
+        "Body": body,
+    }
+    tbl = MagicMock()
+
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="claimed"
+    ) as tj, patch("worker_app.worker.process_job_body") as proc:
+        gr.return_value.Table.return_value = tbl
+        handle_message(msg)
+
+    tj.assert_called_once_with(tbl, "job-idem-1")
+    proc.assert_called_once_with("job-idem-1", "reports/q1.txt", tbl)
+    assert tj.call_args.args[1] != msg["MessageId"]
+
+
 def test_run_once_false_when_no_messages():
     sqs = MagicMock()
     sqs.receive_message.return_value = {}
