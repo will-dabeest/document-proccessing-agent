@@ -1,10 +1,11 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from worker_app.tracing import extract_trace_from_message
-from worker_app.worker import handle_message, run_once
+from worker_app.worker import handle_message, main, run_once
 
 
 def test_extract_trace_from_message_without_traceparent():
@@ -119,3 +120,55 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+def test_main_polls_configured_queue_and_retries_same_client(caplog):
+    """A loop error must back off and poll the same queue, not exit or switch clients."""
+    sqs = MagicMock(name="sqs-client")
+    queue = "http://localhost:4566/000000000000/coverage-jobs"
+    events: list[object] = []
+
+    def configure_tracing() -> None:
+        events.append("trace")
+
+    def get_client():
+        events.append("client")
+        return sqs
+
+    def poll(client, queue_url):
+        events.append(("poll", client, queue_url))
+        polls = [event for event in events if isinstance(event, tuple) and event[0] == "poll"]
+        if len(polls) == 1:
+            raise RuntimeError("sqs blip")
+        raise KeyboardInterrupt()
+
+    def sleep(seconds):
+        events.append(("sleep", seconds))
+
+    with caplog.at_level(logging.INFO, logger="worker_app.worker"), patch(
+        "worker_app.worker._configure_tracing", side_effect=configure_tracing
+    ), patch("worker_app.worker.get_sqs_client", side_effect=get_client), patch(
+        "worker_app.worker.settings.queue_url", queue
+    ), patch(
+        "worker_app.worker.run_once", side_effect=poll
+    ), patch(
+        "worker_app.worker.time.sleep", side_effect=sleep
+    ):
+        main()
+
+    assert events == [
+        "trace",
+        "client",
+        ("poll", sqs, queue),
+        ("sleep", 2),
+        ("poll", sqs, queue),
+    ]
+    messages = [record.getMessage() for record in caplog.records]
+    assert f"worker_started queue={queue}" in messages
+    assert "worker_stopping" in messages
+    loop_errors = [
+        record for record in caplog.records if record.getMessage() == "worker_loop_error"
+    ]
+    assert len(loop_errors) == 1
+    assert loop_errors[0].exc_info is not None
+    assert "sqs blip" in str(loop_errors[0].exc_info[1])
