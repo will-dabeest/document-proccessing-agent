@@ -10,6 +10,32 @@ def test_answer_question_no_context_returns_fixed_message():
     assert out["snippets"] == []
 
 
+def test_answer_question_empty_retrieval_requests_three_chunks_and_skips_llm(caplog):
+    """Empty corpora must not call the LLM, and must still ask Chroma for three chunks."""
+    import logging
+
+    question = "where is the retention policy?"
+
+    def llm_call(_prompt: str) -> str:
+        raise AssertionError("llm should not run when retrieval is empty")
+
+    caplog.set_level(logging.INFO, logger="app.rag_service")
+    with patch("app.rag_service.retrieve_context", return_value=([], [], [])) as retrieve:
+        out = answer_question(question, llm_call=llm_call)
+
+    retrieve.assert_called_once_with(question, n_results=3)
+    assert out == {
+        "answer": "No relevant information found in uploaded documents.",
+        "snippets": [],
+    }
+    assert (
+        "llm_event "
+        '{"outcome": "empty_retrieval", "rag_empty_retrieval": true, '
+        f'"rag_question_chars": {len(question)}, "span": "rag.answer_question"}}'
+    ) in caplog.text
+    assert question not in caplog.text
+
+
 def test_answer_question_calls_llm_and_returns_snippets():
     docs = ["ctx line one", "ctx two"]
     metas = [{"file": "a.txt"}, {"file": "b.txt"}]
