@@ -17,6 +17,34 @@ def test_internal_index_calls_index_document():
     idx.assert_called_once_with("j1", "f.txt", "hello")
 
 
+def test_internal_index_failure_does_not_report_indexed():
+    from app.main import app
+
+    marker = "DOC_MARKER_67fd_index_clause"
+    with patch(
+        "app.main.index_document", side_effect=RuntimeError("chroma down")
+    ) as idx:
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post(
+            "/internal/index",
+            json={
+                "job_id": "job-67fd",
+                "filename": "reports/q1.txt",
+                "text": marker,
+            },
+        )
+
+    assert response.status_code == 500
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        assert payload.get("status") != "indexed"
+    assert marker not in response.text
+    idx.assert_called_once_with("job-67fd", "reports/q1.txt", marker)
+
+
 def test_ask_returns_answer_question_payload():
     from app.main import app
     from app.ollama_client import generate_llama3

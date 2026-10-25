@@ -65,6 +65,39 @@ def test_import_url_publish_failure_returns_502(mock_s3):
     assert response.status_code == 502
 
 
+def test_import_url_index_failure_is_not_reported_as_imported(mock_s3):
+    from app.main import app
+
+    marker = "DOC_MARKER_67fd_import_clause"
+
+    async def _fetch_marked(*_a, **_kw):
+        return (marker.encode("utf-8"), ".txt")
+
+    with patch("app.main.get_s3_client", return_value=mock_s3), patch(
+        "app.main.fetch_url_document", new=_fetch_marked
+    ), patch("app.main.publish_job_safe") as pub, patch(
+        "app.main.index_document", side_effect=RuntimeError("chroma down")
+    ) as idx:
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/import-url", json={"url": "https://example.com/policy"})
+
+    assert response.status_code == 500
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        assert payload.get("status") != "imported"
+    assert marker not in response.text
+    pub.assert_called_once()
+    job = pub.call_args.args[0]
+    assert job.s3_key.startswith("imports/")
+    assert job.s3_key.endswith(".txt")
+    assert pub.call_args.kwargs["filename"] == job.s3_key
+    idx.assert_called_once_with(job.idempotency_key, job.s3_key, marker)
+    assert mock_s3.upload_fileobj.call_args.args[2] == job.s3_key
+
+
 def test_import_url_propagates_url_import_error(mock_s3):
     from app.main import app
     from app.url_import import UrlImportError
