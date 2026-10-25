@@ -73,6 +73,24 @@ def test_index_document_adds_chunks_with_ids_and_metadata(fake_model, fake_colle
     assert all(len(row) == 4 for row in emb)
 
 
+def test_index_document_propagates_collection_add_failure(fake_model, fake_collection):
+    marker = "DOC_MARKER_67fd_chroma_clause"
+    fake_collection.add.side_effect = RuntimeError("chroma down")
+
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        with pytest.raises(RuntimeError, match="chroma down"):
+            index_document("job-67fd", "reports/q1.txt", marker)
+
+    fake_model.encode.assert_called_once()
+    fake_collection.add.assert_called_once()
+    call_kw = fake_collection.add.call_args.kwargs
+    assert marker in call_kw["documents"][0]
+    assert call_kw["ids"] == ["job-67fd-0"]
+    assert call_kw["metadatas"] == [{"file": "reports/q1.txt", "job_id": "job-67fd"}]
+
+
 def test_retrieve_context_passes_n_results_to_query(fake_model, fake_collection):
     with patch("app.rag_service._get_model", return_value=fake_model), patch(
         "app.rag_service._get_collection", return_value=fake_collection
