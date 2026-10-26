@@ -55,6 +55,28 @@ def test_ask_endpoint_wires_ollama_and_retrieve_context():
     assert "ctx one" in prompt
 
 
+def test_ask_retrieval_failure_does_not_return_answer():
+    """A Chroma or embedder outage must not look like an answer or the LLM fallback."""
+    from app.main import app
+
+    question = "where is DOC_MARKER_3123_ask_clause stored?"
+    with patch(
+        "app.rag_service.retrieve_context",
+        side_effect=RuntimeError("chroma down"),
+    ) as retrieve, patch("app.ollama_client.httpx.post") as post:
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/ask", json={"question": question})
+
+    assert response.status_code == 500
+    body = response.text
+    assert "DOC_MARKER_3123_ask_clause" not in body
+    assert "No relevant information found" not in body
+    assert "LLM unavailable" not in body
+    assert '"answer"' not in body
+    retrieve.assert_called_once_with(question, n_results=3)
+    post.assert_not_called()
+
+
 def test_ask_endpoint_ollama_failure_returns_fallback_answer():
     from app.main import app
 
