@@ -1,5 +1,6 @@
 """Tests for index_document and retrieve_context with mocked model and Chroma."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -103,3 +104,27 @@ def test_retrieve_context_default_n_results_is_three(fake_model, fake_collection
         "metadatas",
         "distances",
     ]
+
+
+def test_retrieve_context_query_failure_does_not_look_like_empty_retrieval(
+    fake_model, fake_collection, caplog
+):
+    """A query outage must escape. Swallowing it would look like no documents."""
+    question = "where is DOC_MARKER_3123_ask_clause stored?"
+    fake_collection.query.side_effect = RuntimeError("chroma down")
+    caplog.set_level(logging.INFO, logger="app.rag_service")
+
+    with patch("app.rag_service._get_model", return_value=fake_model), patch(
+        "app.rag_service._get_collection", return_value=fake_collection
+    ):
+        with pytest.raises(RuntimeError, match="chroma down"):
+            retrieve_context(question, n_results=3)
+
+    fake_model.encode.assert_called_once_with([question])
+    qcall = fake_collection.query.call_args
+    assert qcall.kwargs["n_results"] == 3
+    assert qcall.kwargs["include"] == ["documents", "metadatas", "distances"]
+    assert len(qcall.kwargs["query_embeddings"]) == 1
+    assert "DOC_MARKER_3123_ask_clause" not in caplog.text
+    assert '"outcome": "ok"' not in caplog.text
+    assert "empty_retrieval" not in caplog.text
