@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
@@ -76,6 +77,38 @@ def test_handle_message_claimed_runs_process():
         handle_message(msg)
 
     proc.assert_called_once_with("jid-3", "g.txt", tbl)
+
+
+def test_handle_message_claim_client_error_skips_process():
+    body = json.dumps(
+        {
+            "s3_key": "reports/q1.txt",
+            "idempotency_key": "job-claim-denied",
+            "uploaded_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    msg = {"Body": body}
+    error = ClientError(
+        {
+            "Error": {
+                "Code": "ProvisionedThroughputExceededException",
+                "Message": "throughput exceeded",
+            }
+        },
+        "PutItem",
+    )
+
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", side_effect=error
+    ) as tj, patch("worker_app.worker.process_job_body") as proc:
+        gr.return_value.Table.return_value = MagicMock()
+        with pytest.raises(ClientError) as exc:
+            handle_message(msg)
+
+    assert exc.value is error
+    tj.assert_called_once()
+    assert tj.call_args.args[1] == "job-claim-denied"
+    proc.assert_not_called()
 
 
 def test_run_once_false_when_no_messages():
