@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -55,6 +57,30 @@ def test_try_claim_job_duplicate_done_after_completed():
     jid = "job-done-1"
     save_completed(table, jid, "Legal", "All good")
     assert try_claim_job(table, jid) == "duplicate_done"
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["AccessDeniedException", "ProvisionedThroughputExceededException"],
+)
+def test_try_claim_job_reraises_non_conditional_client_error(code):
+    """Permission and throttle errors must not be classified as duplicates."""
+    table = MagicMock()
+    error = ClientError(
+        {"Error": {"Code": code, "Message": "put denied"}},
+        "PutItem",
+    )
+    table.put_item.side_effect = error
+
+    with pytest.raises(ClientError) as exc:
+        try_claim_job(table, "job-claim-denied")
+
+    assert exc.value is error
+    table.get_item.assert_not_called()
+    table.put_item.assert_called_once_with(
+        Item={"MessageId": "job-claim-denied", "Status": "Processing"},
+        ConditionExpression="attribute_not_exists(MessageId)",
+    )
 
 
 @mock_aws
