@@ -29,6 +29,32 @@ def test_extract_text_pdf_delegates_to_pypdf():
     assert out == "Extracted PDF line"
 
 
+def test_extract_text_pdf_joins_pages_in_order_and_strips_once():
+    """Uppercase .PDF still parses. Missing page text is empty, not the string None."""
+    first = MagicMock()
+    first.extract_text.return_value = "  Alpha  "
+    missing = MagicMock()
+    missing.extract_text.return_value = None
+    last = MagicMock()
+    last.extract_text.return_value = "Omega  "
+    mock_reader = MagicMock()
+    mock_reader.pages = [first, missing, last]
+    body = b"%PDF-1.4 multipage"
+    with patch("worker_app.processor.PdfReader", return_value=mock_reader) as reader_cls:
+        out = extract_text_from_object("reports/Report.PDF", body)
+    assert out == "Alpha  \n\nOmega"
+    reader_cls.assert_called_once()
+    assert reader_cls.call_args.args[0].read() == body
+
+
+def test_extract_text_txt_key_does_not_construct_pdf_reader():
+    body = b"%PDF-1.4 quoted in a text file"
+    with patch("worker_app.processor.PdfReader") as reader_cls:
+        out = extract_text_from_object("notes.txt", body)
+    reader_cls.assert_not_called()
+    assert out == "%PDF-1.4 quoted in a text file"
+
+
 @mock_aws
 def test_try_claim_job_claimed_then_duplicate_inflight():
     boto3.client("dynamodb", region_name="us-east-1").create_table(
