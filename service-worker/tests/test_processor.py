@@ -119,3 +119,47 @@ def test_save_completed_overwrites_item():
     assert item["Status"] == "Completed"
     assert item["Classification"] == "Tech"
     assert item["Summary"] == "Summary text"
+
+
+@mock_aws
+def test_process_job_body_missing_agent_fields_completes_and_indexes():
+    boto3.client("dynamodb", region_name="us-east-1").create_table(
+        TableName="ProcessLog",
+        KeySchema=[{"AttributeName": "MessageId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "MessageId", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("ProcessLog")
+    cases = (
+        ({}, "job-agent-empty", "Unknown", ""),
+        ({"summary": "kept summary"}, "job-agent-no-class", "Unknown", "kept summary"),
+        ({"classification": "Legal"}, "job-agent-no-summary", "Legal", ""),
+        (
+            {"classification": "", "summary": "kept blank label"},
+            "job-agent-blank-class",
+            "",
+            "kept blank label",
+        ),
+    )
+    for result, job_id, classification, summary in cases:
+        with patch(
+            "worker_app.processor.download_object_bytes", return_value=b"bytes"
+        ), patch(
+            "worker_app.processor.extract_text_from_object",
+            return_value="extracted policy",
+        ), patch(
+            "worker_app.processor.run_agent", return_value=result
+        ) as run_agent, patch(
+            "worker_app.processor.notify_index"
+        ) as notify:
+            process_job_body(job_id, "reports/q1.txt", table)
+
+        item = table.get_item(Key={"MessageId": job_id})["Item"]
+        assert item["Status"] == "Completed"
+        assert item["Classification"] == classification
+        assert item["Summary"] == summary
+        state = run_agent.call_args[0][0]
+        assert state["document_text"] == "extracted policy"
+        assert state["job_id"] == job_id
+        assert state["s3_key"] == "reports/q1.txt"
+        notify.assert_called_once_with(job_id, "reports/q1.txt", "extracted policy")
