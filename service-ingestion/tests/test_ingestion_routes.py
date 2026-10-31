@@ -108,6 +108,55 @@ def test_documents_maps_dynamo_scan_items():
     mock_resource.Table.assert_called_once()
 
 
+def test_documents_scans_configured_table_and_keeps_blank_summary():
+    from app.main import app
+
+    mock_table = MagicMock()
+    mock_table.scan.side_effect = [
+        {},
+        {
+            "Items": [
+                {
+                    "MessageId": "job-doc-blank",
+                    "Status": "Completed",
+                    "Summary": "",
+                },
+            ],
+        },
+    ]
+    mock_resource = MagicMock()
+    mock_resource.Table.return_value = mock_table
+
+    with patch("app.main.get_dynamodb_resource", return_value=mock_resource), patch(
+        "app.main.settings.dynamodb_table", "coverage-process-log"
+    ):
+        client = TestClient(app)
+        empty = client.get("/documents")
+        completed = client.get("/documents")
+
+    assert empty.status_code == 200
+    assert empty.json() == {"items": []}
+    assert completed.status_code == 200
+    assert completed.json() == {
+        "items": [
+            {
+                "message_id": "job-doc-blank",
+                "status": "Completed",
+                "classification": None,
+                "summary": "",
+            },
+        ],
+    }
+    assert mock_resource.Table.call_count == 2
+    for table_call in mock_resource.Table.call_args_list:
+        assert table_call.args == ("coverage-process-log",)
+        assert table_call.kwargs == {}
+    assert mock_table.scan.call_count == 2
+    for scan_call in mock_table.scan.call_args_list:
+        assert scan_call.args == ()
+        assert scan_call.kwargs == {"Limit": 100}
+
+
 def test_upload_s3_failure_returns_500():
     from app.main import app
 
