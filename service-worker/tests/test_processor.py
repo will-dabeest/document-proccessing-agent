@@ -15,6 +15,10 @@ def test_extract_text_plain_utf8():
     assert extract_text_from_object("notes.txt", b"hello world") == "hello world"
 
 
+def test_extract_text_plain_utf8_preserves_whitespace_only():
+    assert extract_text_from_object("notes.txt", b"   ") == "   "
+
+
 def test_extract_text_non_utf8_returns_empty():
     assert extract_text_from_object("binary.bin", b"\xff\xfe\xfd") == ""
 
@@ -101,6 +105,30 @@ def test_process_job_body_empty_extract_skips_notify_index():
 
     assert ra.call_args[0][0]["document_text"] == "(empty)"
     ni.assert_not_called()
+
+
+def test_process_job_body_whitespace_only_extract_notifies_index():
+    tbl = MagicMock()
+    with patch(
+        "worker_app.processor.download_object_bytes", return_value=b"   "
+    ), patch(
+        "worker_app.processor.extract_text_from_object", return_value="   "
+    ), patch(
+        "worker_app.processor.run_agent",
+        return_value={"classification": "Unknown", "summary": "blank"},
+    ) as ra, patch(
+        "worker_app.processor.save_completed"
+    ) as sc, patch(
+        "worker_app.processor.notify_index"
+    ) as ni:
+        process_job_body("job-ws", "blank.txt", tbl)
+
+    state = ra.call_args[0][0]
+    assert state["document_text"] == "   "
+    assert state["job_id"] == "job-ws"
+    assert state["s3_key"] == "blank.txt"
+    sc.assert_called_once_with(tbl, "job-ws", "Unknown", "blank")
+    ni.assert_called_once_with("job-ws", "blank.txt", "   ")
 
 
 @mock_aws
