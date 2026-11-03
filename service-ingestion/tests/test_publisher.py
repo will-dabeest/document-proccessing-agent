@@ -58,6 +58,59 @@ def test_publish_job_includes_traceparent_when_carrier_provided(sqs_queue_url):
     assert attrs["traceparent"]["DataType"] == "String"
 
 
+def test_publish_job_empty_carrier_does_not_inject_traceparent(sqs_queue_url):
+    url, client = sqs_queue_url
+    job = JobMessage(
+        s3_key="doc.txt",
+        idempotency_key="id-400",
+        uploaded_at="2024-01-04T00:00:00+00:00",
+    )
+    ambient = "00-11111111111111111111111111111111-2222222222222222-01"
+    with patch(
+        "app.publisher._inject_trace_carrier",
+        return_value={"traceparent": ambient},
+    ) as inject:
+        publish_job(job, trace_carrier={})
+
+    inject.assert_not_called()
+    resp = client.receive_message(
+        QueueUrl=url,
+        MaxNumberOfMessages=1,
+        MessageAttributeNames=["All"],
+    )
+    message = resp["Messages"][0]
+    assert json.loads(message["Body"]) == job.to_json_dict()
+    attrs = message.get("MessageAttributes") or {}
+    assert "traceparent" not in attrs
+
+
+def test_publish_job_blank_traceparent_is_not_attached(sqs_queue_url):
+    url, client = sqs_queue_url
+    job = JobMessage(
+        s3_key="doc.txt",
+        idempotency_key="id-500",
+        uploaded_at="2024-01-05T00:00:00+00:00",
+    )
+    ambient = "00-33333333333333333333333333333333-4444444444444444-01"
+    with patch(
+        "app.publisher._inject_trace_carrier",
+        return_value={"traceparent": ambient},
+    ) as inject:
+        publish_job(job, trace_carrier={"traceparent": ""})
+
+    inject.assert_not_called()
+    resp = client.receive_message(
+        QueueUrl=url,
+        MaxNumberOfMessages=1,
+        MessageAttributeNames=["All"],
+    )
+    message = resp["Messages"][0]
+    assert json.loads(message["Body"]) == job.to_json_dict()
+    attrs = message.get("MessageAttributes") or {}
+    assert "traceparent" not in attrs
+    assert ambient not in message["Body"]
+
+
 def test_publish_job_safe_propagates_send_failure():
     job = JobMessage(s3_key="x.txt", idempotency_key="id-300", uploaded_at="2024-01-03T00:00:00+00:00")
     mock_sqs = MagicMock()
