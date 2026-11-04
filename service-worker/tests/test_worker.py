@@ -19,6 +19,39 @@ def test_extract_trace_from_message_with_traceparent():
     assert ctx is not None
 
 
+def test_extract_trace_from_message_forwards_nonempty_traceparent():
+    tp = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"
+    sentinel = object()
+    msg = {"MessageAttributes": {"traceparent": {"StringValue": tp, "DataType": "String"}}}
+    with patch("worker_app.tracing.extract", return_value=sentinel) as extract:
+        ctx = extract_trace_from_message(msg)
+    extract.assert_called_once_with({"traceparent": tp})
+    assert ctx is sentinel
+
+
+def test_extract_trace_from_message_blank_string_keeps_current_context():
+    current = object()
+    msg = {"MessageAttributes": {"traceparent": {"StringValue": "", "DataType": "String"}}}
+    with patch("worker_app.tracing.otel_context.get_current", return_value=current), patch(
+        "worker_app.tracing.extract"
+    ) as extract:
+        ctx = extract_trace_from_message(msg)
+    extract.assert_not_called()
+    assert ctx is current
+
+
+def test_extract_trace_from_message_nondict_traceparent_keeps_current_context():
+    current = object()
+    raw = "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01"
+    msg = {"MessageAttributes": {"traceparent": raw}}
+    with patch("worker_app.tracing.otel_context.get_current", return_value=current), patch(
+        "worker_app.tracing.extract"
+    ) as extract:
+        ctx = extract_trace_from_message(msg)
+    extract.assert_not_called()
+    assert ctx is current
+
+
 def test_handle_message_duplicate_done_skips_process():
     body = json.dumps(
         {
