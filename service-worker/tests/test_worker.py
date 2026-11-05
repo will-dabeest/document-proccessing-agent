@@ -104,6 +104,42 @@ def test_run_once_deletes_on_success():
     )
 
 
+def test_run_once_polls_given_queue_for_one_message_and_forwards_attributes():
+    queue_url = "http://localhost:4566/000000000000/coverage-poll"
+    traceparent = "00-a1b2c3d4e5f60718293a4b5c6d7e8f90-1234567890abcdef-01"
+    body = json.dumps(
+        {
+            "s3_key": "reports/q1.txt",
+            "idempotency_key": "job-poll-attr",
+            "uploaded_at": "2024-01-06T00:00:00+00:00",
+        }
+    )
+    message = {
+        "MessageId": "sqs-msg-poll",
+        "ReceiptHandle": "rh-poll",
+        "Body": body,
+        "MessageAttributes": {
+            "traceparent": {"StringValue": traceparent, "DataType": "String"},
+        },
+    }
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {"Messages": [message]}
+
+    with patch("worker_app.worker.handle_message") as handle:
+        assert run_once(sqs, queue_url) is True
+
+    sqs.receive_message.assert_called_once_with(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=1,
+        WaitTimeSeconds=20,
+        MessageAttributeNames=["All"],
+    )
+    handle.assert_called_once_with(message)
+    sqs.delete_message.assert_called_once_with(
+        QueueUrl=queue_url, ReceiptHandle="rh-poll"
+    )
+
+
 def test_run_once_no_delete_when_handle_message_raises():
     body = json.dumps(
         {
