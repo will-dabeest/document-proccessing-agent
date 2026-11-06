@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -119,3 +120,58 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+def test_run_once_delete_failure_stays_in_poll_and_logs(caplog):
+    """A delete error after a successful job must not escape the poll or hide the document."""
+    queue_url = "http://localhost:4566/000000000000/coverage-delete"
+    marker = "DOC_MARKER_delete_clause"
+    body = json.dumps(
+        {
+            "s3_key": f"reports/{marker}.txt",
+            "idempotency_key": "job-delete-fail",
+            "uploaded_at": "2024-01-07T00:00:00+00:00",
+        }
+    )
+    message = {
+        "MessageId": "sqs-msg-delete",
+        "ReceiptHandle": "rh-delete-fail",
+        "Body": body,
+    }
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {"Messages": [message]}
+    seen: list[object] = []
+
+    def handle(msg):
+        seen.append(("handle", msg))
+
+    def delete(**kwargs):
+        seen.append(("delete", kwargs))
+        raise RuntimeError("sqs delete refused")
+
+    sqs.delete_message.side_effect = delete
+
+    with caplog.at_level(logging.DEBUG, logger="worker_app.worker"), patch(
+        "worker_app.worker.handle_message", side_effect=handle
+    ):
+        assert run_once(sqs, queue_url) is True
+
+    assert seen == [
+        ("handle", message),
+        (
+            "delete",
+            {"QueueUrl": queue_url, "ReceiptHandle": "rh-delete-fail"},
+        ),
+    ]
+    failures = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "message_processing_failed: sqs delete refused"
+    ]
+    assert len(failures) == 1
+    assert failures[0].levelno == logging.ERROR
+    assert failures[0].exc_info is not None
+    assert isinstance(failures[0].exc_info[1], RuntimeError)
+    assert "worker_loop_error" not in caplog.text
+    assert marker not in caplog.text
+    assert "job-delete-fail" not in caplog.text
