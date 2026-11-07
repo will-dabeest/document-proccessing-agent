@@ -1,8 +1,10 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from worker_app.config import settings
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
 
@@ -119,3 +121,46 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+def test_run_once_duplicate_inflight_keeps_message_for_retry(caplog):
+    body = json.dumps(
+        {
+            "s3_key": "reports/DOC_MARKER_inflight_keep.txt",
+            "idempotency_key": "job-inflight-keep",
+            "uploaded_at": "2024-01-08T00:00:00+00:00",
+        }
+    )
+    queue_url = "http://localhost:4566/000000000000/coverage-inflight"
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [
+            {
+                "MessageId": "sqs-msg-inflight-keep",
+                "ReceiptHandle": "rh-inflight-keep",
+                "Body": body,
+            }
+        ],
+    }
+    fake_table = object()
+
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="duplicate_inflight"
+    ) as claim, patch("worker_app.worker.process_job_body") as proc, caplog.at_level(
+        logging.ERROR, logger="worker_app.worker"
+    ):
+        gr.return_value.Table.return_value = fake_table
+        assert run_once(sqs, queue_url) is True
+
+    gr.return_value.Table.assert_called_once_with(settings.dynamodb_table)
+    claim.assert_called_once_with(fake_table, "job-inflight-keep")
+    proc.assert_not_called()
+    sqs.delete_message.assert_not_called()
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1
+    assert errors[0].message == "message_processing_failed: duplicate_inflight_retry"
+    assert errors[0].exc_info is not None
+    assert isinstance(errors[0].exc_info[1], RuntimeError)
+    assert "DOC_MARKER_inflight_keep" not in errors[0].message
+    assert "job-inflight-keep" not in errors[0].message
+    assert "worker_loop_error" not in caplog.text
