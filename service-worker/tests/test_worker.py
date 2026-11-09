@@ -1,8 +1,10 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from worker_app.config import settings
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
 
@@ -119,3 +121,48 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+def test_run_once_claimed_processes_body_then_deletes_message(caplog):
+    body = json.dumps(
+        {
+            "s3_key": "reports/DOC_MARKER_claimed_ack.txt",
+            "idempotency_key": "job-claimed-ack",
+            "uploaded_at": "2024-01-10T00:00:00+00:00",
+        }
+    )
+    queue_url = "http://localhost:4566/000000000000/coverage-claimed"
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [
+            {
+                "MessageId": "sqs-msg-claimed-ack",
+                "ReceiptHandle": "rh-claimed-ack",
+                "Body": body,
+            }
+        ],
+    }
+    fake_table = object()
+
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.try_claim_job", return_value="claimed"
+    ) as claim, patch("worker_app.worker.process_job_body") as proc, caplog.at_level(
+        logging.DEBUG, logger="worker_app.worker"
+    ):
+        gr.return_value.Table.return_value = fake_table
+        assert run_once(sqs, queue_url) is True
+
+    gr.return_value.Table.assert_called_once_with(settings.dynamodb_table)
+    claim.assert_called_once_with(fake_table, "job-claimed-ack")
+    proc.assert_called_once_with(
+        "job-claimed-ack", "reports/DOC_MARKER_claimed_ack.txt", fake_table
+    )
+    sqs.delete_message.assert_called_once_with(
+        QueueUrl=queue_url, ReceiptHandle="rh-claimed-ack"
+    )
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors == []
+    assert "message_processing_failed" not in caplog.text
+    assert "DOC_MARKER_claimed_ack" not in caplog.text
+    assert "job-claimed-ack" not in caplog.text
+    assert "worker_loop_error" not in caplog.text
