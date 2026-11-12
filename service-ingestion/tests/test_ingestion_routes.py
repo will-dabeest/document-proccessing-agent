@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -124,3 +125,41 @@ def test_upload_s3_failure_returns_500():
         )
 
     assert response.status_code == 500
+
+
+def test_health_stays_up_when_tracing_exporter_fails(caplog):
+    from app.main import app
+
+    exporter_error = RuntimeError("ingestion otlp exporter refused")
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        with (
+            patch("app.main.OTLPSpanExporter", side_effect=exporter_error) as exporter,
+            patch("app.main.trace.set_tracer_provider") as set_provider,
+            patch("app.main.settings") as runtime_settings,
+        ):
+            runtime_settings.otlp_endpoint = "ingest-otlp-fail.internal:4317"
+            runtime_settings.ollama_model = "coverage-tracing-model"
+            with TestClient(app) as client:
+                response = client.get("/health")
+            assert app.state.config == {"model": "coverage-tracing-model"}
+
+    exporter.assert_called_once_with(
+        endpoint="ingest-otlp-fail.internal:4317",
+        insecure=True,
+    )
+    set_provider.assert_not_called()
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    warnings = [
+        record
+        for record in caplog.records
+        if record.name == "app.main" and record.message == "tracing_init_failed"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0].levelno == logging.WARNING
+    assert warnings[0].exc_info is not None
+    assert warnings[0].exc_info[1] is exporter_error
+    assert not any(
+        record.name == "app.main" and record.levelno >= logging.ERROR
+        for record in caplog.records
+    )
