@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -55,6 +57,35 @@ def test_try_claim_job_duplicate_done_after_completed():
     jid = "job-done-1"
     save_completed(table, jid, "Legal", "All good")
     assert try_claim_job(table, jid) == "duplicate_done"
+
+
+@pytest.mark.parametrize("get_response", [{}, {"Item": None}])
+def test_try_claim_job_absent_row_stays_inflight(get_response):
+    """A claim conflict with no readable row is not a completed job.
+
+    duplicate_done would let the worker delete the queue message for work
+    that never finished. A missing or null Item stays duplicate_inflight.
+    """
+    table = MagicMock()
+    error = ClientError(
+        {
+            "Error": {
+                "Code": "ConditionalCheckFailedException",
+                "Message": "claim row conflict",
+            }
+        },
+        "PutItem",
+    )
+    table.put_item.side_effect = error
+    table.get_item.return_value = get_response
+
+    assert try_claim_job(table, "job-claim-absent") == "duplicate_inflight"
+
+    table.put_item.assert_called_once_with(
+        Item={"MessageId": "job-claim-absent", "Status": "Processing"},
+        ConditionExpression="attribute_not_exists(MessageId)",
+    )
+    table.get_item.assert_called_once_with(Key={"MessageId": "job-claim-absent"})
 
 
 @mock_aws
