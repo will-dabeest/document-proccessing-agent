@@ -2,7 +2,9 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
+from worker_app.config import settings
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
 
@@ -76,6 +78,45 @@ def test_handle_message_claimed_runs_process():
         handle_message(msg)
 
     proc.assert_called_once_with("jid-3", "g.txt", tbl)
+
+
+def test_handle_message_claim_status_read_error_skips_process():
+    """An unread claim status must not be processed or treated as a retry."""
+    body = json.dumps(
+        {
+            "s3_key": "reports/unread-claim.txt",
+            "idempotency_key": "job-claim-unread",
+            "uploaded_at": "2024-01-12T00:00:00+00:00",
+        }
+    )
+    msg = {"Body": body}
+    table = MagicMock()
+    table.put_item.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ConditionalCheckFailedException",
+                "Message": "conditional claim lost",
+            }
+        },
+        "PutItem",
+    )
+    unread = ClientError(
+        {"Error": {"Code": "InternalServerError", "Message": "claim status unread"}},
+        "GetItem",
+    )
+    table.get_item.side_effect = unread
+
+    with patch("worker_app.worker.get_dynamodb_resource") as gr, patch(
+        "worker_app.worker.process_job_body"
+    ) as proc:
+        gr.return_value.Table.return_value = table
+        with pytest.raises(ClientError) as exc:
+            handle_message(msg)
+
+    assert exc.value is unread
+    gr.return_value.Table.assert_called_once_with(settings.dynamodb_table)
+    table.get_item.assert_called_once_with(Key={"MessageId": "job-claim-unread"})
+    proc.assert_not_called()
 
 
 def test_run_once_false_when_no_messages():

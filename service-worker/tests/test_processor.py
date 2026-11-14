@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from worker_app.processor import (
@@ -55,6 +57,37 @@ def test_try_claim_job_duplicate_done_after_completed():
     jid = "job-done-1"
     save_completed(table, jid, "Legal", "All good")
     assert try_claim_job(table, jid) == "duplicate_done"
+
+
+def test_try_claim_job_status_read_error_propagates():
+    """A claim conflict whose status read fails must raise that read error."""
+    table = MagicMock()
+    conflict = ClientError(
+        {
+            "Error": {
+                "Code": "ConditionalCheckFailedException",
+                "Message": "conditional claim lost",
+            }
+        },
+        "PutItem",
+    )
+    unread = ClientError(
+        {"Error": {"Code": "InternalServerError", "Message": "claim status unread"}},
+        "GetItem",
+    )
+    table.put_item.side_effect = conflict
+    table.get_item.side_effect = unread
+
+    with pytest.raises(ClientError) as exc:
+        try_claim_job(table, "job-claim-unread")
+
+    assert exc.value is unread
+    assert exc.value.response["Error"]["Code"] == "InternalServerError"
+    table.put_item.assert_called_once_with(
+        Item={"MessageId": "job-claim-unread", "Status": "Processing"},
+        ConditionExpression="attribute_not_exists(MessageId)",
+    )
+    table.get_item.assert_called_once_with(Key={"MessageId": "job-claim-unread"})
 
 
 @mock_aws
