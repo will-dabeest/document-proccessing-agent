@@ -1,7 +1,9 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
@@ -119,3 +121,59 @@ def test_run_once_no_delete_when_handle_message_raises():
     with patch("worker_app.worker.handle_message", side_effect=RuntimeError("boom")):
         assert run_once(sqs, "http://q") is True
     sqs.delete_message.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("body", "receipt", "message_id"),
+    [
+        ("   ", "rh-ws-spaces-keep", "sqs-msg-ws-spaces-keep"),
+        ("\n", "rh-ws-newline-keep", "sqs-msg-ws-newline-keep"),
+    ],
+)
+def test_run_once_whitespace_only_body_stays_queued(body, receipt, message_id, caplog):
+    """Whitespace is truthy, so it is parsed as-is and must not be acked."""
+    queue_url = "http://localhost:4566/000000000000/coverage-ws-body"
+    envelope = "DOC_MARKER_ws_body_envelope"
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [
+            {
+                "ReceiptHandle": receipt,
+                "MessageId": message_id,
+                "Body": body,
+                "MessageAttributes": {
+                    "document_name": {"StringValue": envelope},
+                },
+            }
+        ],
+    }
+
+    with caplog.at_level(logging.ERROR), patch(
+        "worker_app.worker.get_dynamodb_resource"
+    ) as dynamodb, patch("worker_app.worker.try_claim_job") as claim, patch(
+        "worker_app.worker.process_job_body"
+    ) as process:
+        assert run_once(sqs, queue_url) is True
+
+    dynamodb.assert_not_called()
+    claim.assert_not_called()
+    process.assert_not_called()
+    sqs.delete_message.assert_not_called()
+
+    errors = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert len(errors) == 1
+    assert errors[0].getMessage().startswith("message_processing_failed:")
+    exc = errors[0].exc_info[1]
+    assert isinstance(exc, ValidationError)
+    parsed = exc.errors()
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "json_invalid"
+    assert parsed[0]["loc"] == ()
+    assert parsed[0]["input"] == body
+
+    logged = caplog.text
+    assert "worker_loop_error" not in logged
+    assert receipt not in logged
+    assert message_id not in logged
+    assert queue_url not in logged
+    assert envelope not in logged
