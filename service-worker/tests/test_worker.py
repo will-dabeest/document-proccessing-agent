@@ -2,6 +2,8 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from opentelemetry import trace
+from opentelemetry.propagate import extract as propagate_extract
 
 from worker_app.tracing import extract_trace_from_message
 from worker_app.worker import handle_message, run_once
@@ -17,6 +19,21 @@ def test_extract_trace_from_message_with_traceparent():
     msg = {"MessageAttributes": {"traceparent": {"StringValue": tp}}}
     ctx = extract_trace_from_message(msg)
     assert ctx is not None
+
+
+def test_extract_trace_from_message_whitespace_traceparent_is_not_a_remote_span():
+    for raw in ("   ", "\n"):
+        msg = {
+            "MessageAttributes": {
+                "traceparent": {"StringValue": raw, "DataType": "String"},
+            }
+        }
+        with patch("worker_app.tracing.extract", wraps=propagate_extract) as extract:
+            ctx = extract_trace_from_message(msg)
+        extract.assert_called_once_with({"traceparent": raw})
+        span_context = trace.get_current_span(ctx).get_span_context()
+        assert span_context.is_remote is False
+        assert span_context.is_valid is False
 
 
 def test_handle_message_duplicate_done_skips_process():
